@@ -1,104 +1,69 @@
-# Automated Recon Platform
+# Dev5: pipeline and reporting
 
-> **Engineering Execution Plan - 5-Developer Team**
+This branch collects the output of Dev2, Dev3, and Dev4 and turns it into files the club can share. It checks the JSON, merges it, and writes a report for Discord or for IT.
 
-A fast, structured reconnaissance orchestrator designed to parallelize asset mapping and deliver a single actionable report:
+This is a lite version. It uses flat files and a small Python script. Postgres and the HTML dashboard come later.
 
-**Domains -> Subdomains -> IPs -> Ports -> Services -> Technologies -> URLs -> APIs -> JS Endpoints -> Paths**
+## What it takes in
 
-## Operational Modes
+The script expects three files in one folder, all produced with the same target list and mode:
 
-### Mode 1: THM / HTB / CTF
+- `dev2.json` with subdomains and IPs
+- `dev3.json` with ports, services, and HTTP results
+- `dev4.json` with URLs, JS endpoints, and params
 
-- Aggressive + comprehensive active scanning
-- Maximized parallel execution for fast turnaround
-- Port sweeping, service detection (Nmap/Naabu)
-- Full active directory brute-forcing (ffuf/feroxbuster)
-- Deep JS asset extraction & live endpoint analysis
+If a file is missing, the merge still runs and leaves that section empty. If a record has the wrong keys, the script reports the file and line number and skips that record.
 
-### Mode 2: Real Web Scan
+## What it puts out
 
-- Non-aggressive, safe scanning posture
-- Prioritizes passive OSINT & public APIs
-- Zero direct directory brute-forcing
-- Passive port/service mapping (Shodan/Censys)
-- Basic HTTP/TLS health verification
+- `report.json` with every host in one place
+- `report.md` with tables a person can read
+- `run-meta.json` with mode, time, input file hashes, and counts
 
-## Work Allocation Matrix
+`report.md` is enough for a CTF writeup or a short note to IT. `report.json` is for later work like the dashboard.
 
-| Developer | Primary Domain | Core Tools & Tech | Key Deliverables |
-|---|---|---|---|
-| **Dev 1 (Lead)** | Architecture, State & Concurrency | Go / Python, Redis, Docker | Main orchestration engine, worker queue, module loader, CLI/API config, mode enforcement |
-| **Dev 2** | Passive Discovery & OSINT | Subfinder, Amass, Crt.sh, Shodan | Subdomain discovery, CT log parser, passive IP lookup, centralized API key manager |
-| **Dev 3** | Active Scanning & Probing | Nmap, Masscan, Httpx, Ffuf | Active port scanner, HTTP probing wrapper, mode-switch controls, content fuzzer |
-| **Dev 4** | JS & API Analysis | Katana, LinkFinder, SecretFinder | Historical URL fetcher, JS static analysis engine, path/parameter extractor, secret scanner |
-| **Dev 5** | Data Pipeline & Reporting | PostgreSQL, SQLite, Jinja2 | Unified JSON schema validator, graph/tree data aggregator, JSON export & HTML dashboard |
+## Record shape
 
-## Core Platform Architecture
+Each host in `report.json` looks like this:
 
-The platform follows this execution flow:
-
-```text
-Target IP/Domain
-      |
-      v
-[ Dev 1 Engine ]
-      |
-      v
-[ Dev 2 Passive + Dev 3 Active + Dev 4 JS Analysis ]
-      |
-      v
-[ Dev 5 Aggregator ]
-      |
-      v
-Attack Surface Map
+```json
+{
+  "host": "portal.college.edu",
+  "ips": ["10.10.5.12"],
+  "ports": [{"port": 443, "service": "https"}],
+  "tech": ["nginx", "php"],
+  "urls": ["/api/v1/login"],
+  "notes": ["ffuf skipped in audit mode"]
+}
 ```
 
-## Sprint Breakdown & Task Delegation
+`notes` keeps context that would otherwise get lost, such as why fuzzing was skipped.
 
-### Developer 1: Core Engine & Orchestration
+## Layout
 
-**Primary domain:** Core Platform & Architecture
+```
+dev5/
+  merge.py
+  validate.py
+  schemas/
+    dev2.json
+    dev3.json
+    dev4.json
+  out/
+```
 
-- **Architecture & Pipeline:** Build the core execution engine utilizing an asynchronous task queue or event-driven worker pool.
-- **Mode Controller:** Enforce strict runtime execution based on operational mode:
-  - **CTF Mode:** Maximum thread pool, active port sweeps, and directory fuzzing enabled.
-  - **Passive Mode:** Rate-limiting enforced, brute-force disabled, IP queries routed to passive APIs.
-- **Module Lifecycle:** Create abstract interfaces and plugin loaders so Devs 2, 3, and 4 can register modules dynamically.
+`validate.py` checks keys and types. `merge.py` joins the three files on host or IP and writes the reports.
 
-### Developer 2: Passive Reconnaissance Engine
+## How to run
 
-**Primary domain:** OSINT & Passive Discovery
+```bash
+python merge.py --in ./out --out ./report
+```
 
-- **Subdomain Enumeration:** Wrap and integrate subfinder, amass, and chaos with dynamic deduplication.
-- **Certificate Transparency:** Query crt.sh and certspotter APIs to discover Subject Alternative Names (SANs).
-- **Passive Asset Profiling:** Query Shodan and Censys REST APIs for open ports and banners when in safe mode.
-- **Secrets Config Manager:** Build central credential management for passive service API keys.
+This reads `./out/dev2.json`, `./out/dev3.json`, `./out/dev4.json` and writes `report.json`, `report.md`, and `run-meta.json` into `./report`.
 
-### Developer 3: Active Scanning & Probing Engine
+JSON validation is strict about keys but lenient about extra fields. A module can add a new key without breaking the merge, as long as the required keys stay present.
 
-**Primary domain:** Active Recon & Content Discovery
+## For later
 
-- **Port Scanning (CTF Mode):** Integrate naabu or masscan for fast port discovery, piping live ports to nmap for service identification (`-sV`).
-- **HTTP Probing & Tech Stacks:** Implement httpx wrapper to check host status, titles, and map technology signatures (Wappalyzer).
-- **Content Discovery (CTF Mode):** Wrap ffuf or feroxbuster with context-aware wordlists and pipe findings to Dev 5.
-
-### Developer 4: JS & API Analysis Engine
-
-**Primary domain:** Endpoint & Parameter Extraction
-
-- **Historical & Crawled URLs:** Aggregate legacy URLs using waybackurls, gau, and crawling with katana.
-- **JS Static Analysis:** Extract JavaScript files and pass them through LinkFinder and JSFinder to discover hidden API paths.
-- **Secret Identification:** Implement regex analysis via SecretFinder to highlight potential API keys and unlinked endpoints.
-
-### Developer 5: Data Pipeline, Aggregation & Reporting
-
-**Primary domain:** Data Normalization & Dashboards
-
-- **Data Aggregation Engine:** Ingest concurrent data feeds from Devs 2, 3, and 4 into a unified node graph.
-- **Data Validation & Schema:** Enforce strict JSON schema validation for all intermediate tool outputs.
-- **Reporting Suite:** Generate structured JSON outputs and an interactive HTML attack-surface dashboard.
-
-## Deliverable
-
-The final system is intended to consolidate parallel reconnaissance results into a unified, actionable **attack surface map**, with structured JSON output and an interactive HTML dashboard.
+The HTML dashboard and Postgres store belong in v2. When they land, they should read `report.json` as input so the current Dev2, Dev3, and Dev4 outputs keep working.

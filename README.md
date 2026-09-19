@@ -1,104 +1,82 @@
-# Automated Recon Platform
+# Dev3: active scanning and probing
 
-> **Engineering Execution Plan - 5-Developer Team**
+This branch probes live hosts. It takes the subdomain list from Dev2 and returns open ports, service names, web titles, tech fingerprints, and found paths. It is the only branch that sends packets to ports or requests paths that may not exist.
 
-A fast, structured reconnaissance orchestrator designed to parallelize asset mapping and deliver a single actionable report:
+Stack for this branch: Python, naabu to find ports, nmap to fingerprint services, httpx to probe HTTP, ffuf to fuzz paths, all packed in Docker so it runs the same on any Linux laptop.
 
-**Domains -> Subdomains -> IPs -> Ports -> Services -> Technologies -> URLs -> APIs -> JS Endpoints -> Paths**
+## Input and output
 
-## Operational Modes
+Input is a text file with one host per line. It usually comes from Dev2.
 
-### Mode 1: THM / HTB / CTF
-
-- Aggressive + comprehensive active scanning
-- Maximized parallel execution for fast turnaround
-- Port sweeping, service detection (Nmap/Naabu)
-- Full active directory brute-forcing (ffuf/feroxbuster)
-- Deep JS asset extraction & live endpoint analysis
-
-### Mode 2: Real Web Scan
-
-- Non-aggressive, safe scanning posture
-- Prioritizes passive OSINT & public APIs
-- Zero direct directory brute-forcing
-- Passive port/service mapping (Shodan/Censys)
-- Basic HTTP/TLS health verification
-
-## Work Allocation Matrix
-
-| Developer | Primary Domain | Core Tools & Tech | Key Deliverables |
-|---|---|---|---|
-| **Dev 1 (Lead)** | Architecture, State & Concurrency | Go / Python, Redis, Docker | Main orchestration engine, worker queue, module loader, CLI/API config, mode enforcement |
-| **Dev 2** | Passive Discovery & OSINT | Subfinder, Amass, Crt.sh, Shodan | Subdomain discovery, CT log parser, passive IP lookup, centralized API key manager |
-| **Dev 3** | Active Scanning & Probing | Nmap, Masscan, Httpx, Ffuf | Active port scanner, HTTP probing wrapper, mode-switch controls, content fuzzer |
-| **Dev 4** | JS & API Analysis | Katana, LinkFinder, SecretFinder | Historical URL fetcher, JS static analysis engine, path/parameter extractor, secret scanner |
-| **Dev 5** | Data Pipeline & Reporting | PostgreSQL, SQLite, Jinja2 | Unified JSON schema validator, graph/tree data aggregator, JSON export & HTML dashboard |
-
-## Core Platform Architecture
-
-The platform follows this execution flow:
-
-```text
-Target IP/Domain
-      |
-      v
-[ Dev 1 Engine ]
-      |
-      v
-[ Dev 2 Passive + Dev 3 Active + Dev 4 JS Analysis ]
-      |
-      v
-[ Dev 5 Aggregator ]
-      |
-      v
-Attack Surface Map
+```
+app.college.edu
+portal.college.edu
+10.10.5.12
 ```
 
-## Sprint Breakdown & Task Delegation
+Output is `dev3.json`, one record per port. Dev5 reads this file directly.
 
-### Developer 1: Core Engine & Orchestration
+```json
+{
+  "host": "portal.college.edu",
+  "ip": "10.10.5.12",
+  "port": 443,
+  "service": "https",
+  "banner": "nginx 1.18",
+  "http": {
+    "status": 200,
+    "title": "Student Portal",
+    "tech": ["nginx", "php"]
+  },
+  "dirs": ["/admin", "/api/v1/login"],
+  "source_tool": "nmap+httpx+ffuf"
+}
+```
 
-**Primary domain:** Core Platform & Architecture
+If httpx finds no HTTP on a port, the `http` block is null and `dirs` stays empty.
 
-- **Architecture & Pipeline:** Build the core execution engine utilizing an asynchronous task queue or event-driven worker pool.
-- **Mode Controller:** Enforce strict runtime execution based on operational mode:
-  - **CTF Mode:** Maximum thread pool, active port sweeps, and directory fuzzing enabled.
-  - **Passive Mode:** Rate-limiting enforced, brute-force disabled, IP queries routed to passive APIs.
-- **Module Lifecycle:** Create abstract interfaces and plugin loaders so Devs 2, 3, and 4 can register modules dynamically.
+## Modes
 
-### Developer 2: Passive Reconnaissance Engine
+The `--mode` flag changes what this script is allowed to do.
 
-**Primary domain:** OSINT & Passive Discovery
+In ctf mode the script runs the full chain: naabu for all common ports, nmap `-sV -sC` on what naabu found, httpx with tech detect and TLS probe, then ffuf with the raft wordlists. Threads and rate are high. Use this on THM, HTB, and other lab targets.
 
-- **Subdomain Enumeration:** Wrap and integrate subfinder, amass, and chaos with dynamic deduplication.
-- **Certificate Transparency:** Query crt.sh and certspotter APIs to discover Subject Alternative Names (SANs).
-- **Passive Asset Profiling:** Query Shodan and Censys REST APIs for open ports and banners when in safe mode.
-- **Secrets Config Manager:** Build central credential management for passive service API keys.
+In audit mode the script stays quiet. naabu is limited to the top 100 ports at `--rate 20`, nmap runs with `-T2`, httpx checks status, title, and TLS only. ffuf does not run. It exits with a note saying fuzzing was skipped. This is the setting for college infra.
 
-### Developer 3: Active Scanning & Probing Engine
+## Scope check
 
-**Primary domain:** Active Recon & Content Discovery
+`--scope` points to a file with one allowed host, domain, or CIDR per line. In audit mode the script reads it first and compares every target. A target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs.
 
-- **Port Scanning (CTF Mode):** Integrate naabu or masscan for fast port discovery, piping live ports to nmap for service identification (`-sV`).
-- **HTTP Probing & Tech Stacks:** Implement httpx wrapper to check host status, titles, and map technology signatures (Wappalyzer).
-- **Content Discovery (CTF Mode):** Wrap ffuf or feroxbuster with context-aware wordlists and pipe findings to Dev 5.
+## Layout
 
-### Developer 4: JS & API Analysis Engine
+```
+dev3/
+  dev3.py
+  scope.py
+  parsers.py
+  wordlists/
+  Dockerfile
+```
 
-**Primary domain:** Endpoint & Parameter Extraction
+`dev3.py` handles flags and calls each step. `scope.py` holds the scope check. `parsers.py` converts nmap, naabu, httpx, and ffuf output into the JSON above.
 
-- **Historical & Crawled URLs:** Aggregate legacy URLs using waybackurls, gau, and crawling with katana.
-- **JS Static Analysis:** Extract JavaScript files and pass them through LinkFinder and JSFinder to discover hidden API paths.
-- **Secret Identification:** Implement regex analysis via SecretFinder to highlight potential API keys and unlinked endpoints.
+## How to run
 
-### Developer 5: Data Pipeline, Aggregation & Reporting
+```bash
+python dev3.py --in subdomains.txt --mode ctf --scope scope.txt --out dev3.json
+python dev3.py --in subdomains.txt --mode audit --scope scope.txt --out dev3.json
+```
 
-**Primary domain:** Data Normalization & Dashboards
+Docker build for club laptops:
 
-- **Data Aggregation Engine:** Ingest concurrent data feeds from Devs 2, 3, and 4 into a unified node graph.
-- **Data Validation & Schema:** Enforce strict JSON schema validation for all intermediate tool outputs.
-- **Reporting Suite:** Generate structured JSON outputs and an interactive HTML attack-surface dashboard.
+```bash
+docker build -t csc-recon:dev3 .
+docker run --rm -v $(pwd)/out:/out csc-recon:dev3 \
+  --in /out/subdomains.txt --mode audit --scope /out/scope.txt --out /out/dev3.json
+```
 
-## Deliverable
+naabu needs privileges for SYN scan. Without root it falls back to connect scan, which is slower but fine for small scopes.
 
-The final system is intended to consolidate parallel reconnaissance results into a unified, actionable **attack surface map**, with structured JSON output and an interactive HTML dashboard.
+## Build order
+
+I built httpx first because it is safe and feeds everything else. Then nmap parsing. Then the mode gate and scope check. ffuf came last since it needs live HTTP hosts from the earlier steps. If you pick this branch up, test in that same order.

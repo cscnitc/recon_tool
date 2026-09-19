@@ -28,11 +28,11 @@ A fast, structured reconnaissance orchestrator designed to parallelize asset map
 
 | Developer | Primary Domain | Core Tools & Tech | Key Deliverables |
 |---|---|---|---|
-| **Dev 1 (Lead)** | Architecture, State & Concurrency | Go / Python, Redis, Docker | Main orchestration engine, worker queue, module loader, CLI/API config, mode enforcement |
+| **Dev 1 (Lead)** | Architecture, State & Concurrency | Python, Docker (lite v1, no Redis) | Runner with shared flags, scope check, mode enforcement, log per run |
 | **Dev 2** | Passive Discovery & OSINT | Subfinder, Amass, Crt.sh, Shodan | Subdomain discovery, CT log parser, passive IP lookup, centralized API key manager |
-| **Dev 3** | Active Scanning & Probing | Nmap, Masscan, Httpx, Ffuf | Active port scanner, HTTP probing wrapper, mode-switch controls, content fuzzer |
+| **Dev 3** | Active Scanning & Probing | Naabu, Nmap, Httpx, Ffuf | Naabu to Nmap service scan, httpx tech probe, mode-gated ffuf fuzzer |
 | **Dev 4** | JS & API Analysis | Katana, LinkFinder, SecretFinder | Historical URL fetcher, JS static analysis engine, path/parameter extractor, secret scanner |
-| **Dev 5** | Data Pipeline & Reporting | PostgreSQL, SQLite, Jinja2 | Unified JSON schema validator, graph/tree data aggregator, JSON export & HTML dashboard |
+| **Dev 5** | Data Pipeline & Reporting | Python, SQLite, JSON/Markdown (lite v1) | Schema check, merge to report.json/md, run metadata (DB and HTML dashboard in v2) |
 
 ## Core Platform Architecture
 
@@ -60,11 +60,12 @@ Attack Surface Map
 
 **Primary domain:** Core Platform & Architecture
 
-- **Architecture & Pipeline:** Build the core execution engine utilizing an asynchronous task queue or event-driven worker pool.
+v1 is a lite Python runner (see `dev1` branch). No Redis, no database. The full queue can replace it later without changing module flags.
+- **Architecture & Pipeline:** Call dev2, then dev3, then dev4 with the same four flags (`--in --mode --scope --out`).
 - **Mode Controller:** Enforce strict runtime execution based on operational mode:
-  - **CTF Mode:** Maximum thread pool, active port sweeps, and directory fuzzing enabled.
-  - **Passive Mode:** Rate-limiting enforced, brute-force disabled, IP queries routed to passive APIs.
-- **Module Lifecycle:** Create abstract interfaces and plugin loaders so Devs 2, 3, and 4 can register modules dynamically.
+  - **CTF Mode:** High threads, active port sweeps, and directory fuzzing enabled.
+  - **Audit Mode:** Low rate (`nmap -T2`, top 100 ports), fuzzing off, `scope.txt` required. Anything outside scope stops the run.
+- **Module Lifecycle:** Each module exposes `run(targets, mode, scope_file)` and writes JSON. The runner logs user, time, mode, and exit code per module.
 
 ### Developer 2: Passive Reconnaissance Engine
 
@@ -79,9 +80,10 @@ Attack Surface Map
 
 **Primary domain:** Active Recon & Content Discovery
 
-- **Port Scanning (CTF Mode):** Integrate naabu or masscan for fast port discovery, piping live ports to nmap for service identification (`-sV`).
-- **HTTP Probing & Tech Stacks:** Implement httpx wrapper to check host status, titles, and map technology signatures (Wappalyzer).
-- **Content Discovery (CTF Mode):** Wrap ffuf or feroxbuster with context-aware wordlists and pipe findings to Dev 5.
+Stack is Python with naabu, nmap, httpx, and ffuf in Docker (see `dev3` branch). No masscan, no paid services.
+- **Port Scanning (CTF Mode):** Run naabu for fast discovery, pipe live ports to nmap for service identification (`-sV -sC`). In audit mode limit to top 100 ports at `--rate 20` with `-T2`.
+- **HTTP Probing & Tech Stacks:** Use the httpx wrapper with tech detect and TLS probe to record status, title, and tech. No separate Wappalyzer step.
+- **Content Discovery (CTF Mode):** Use ffuf with raft wordlists. It stays off in audit mode unless IT approved a window and the target is in scope. Findings go to Dev 5 as `dev3.json`.
 
 ### Developer 4: JS & API Analysis Engine
 
@@ -95,9 +97,22 @@ Attack Surface Map
 
 **Primary domain:** Data Normalization & Dashboards
 
-- **Data Aggregation Engine:** Ingest concurrent data feeds from Devs 2, 3, and 4 into a unified node graph.
-- **Data Validation & Schema:** Enforce strict JSON schema validation for all intermediate tool outputs.
-- **Reporting Suite:** Generate structured JSON outputs and an interactive HTML attack-surface dashboard.
+v1 is a lite Python merge (see `dev5` branch). No Postgres, no hosted dashboard. Those move to v2 and will read the same `report.json`.
+- **Data Aggregation Engine:** Read `dev2.json`, `dev3.json`, and `dev4.json` from one folder and join on host or IP.
+- **Data Validation & Schema:** Check required keys and types. Skip bad records with file and line noted, allow extra keys.
+- **Reporting Suite:** Write `report.json`, `report.md`, and `run-meta.json`. The markdown fits a CTF writeup or a short note to IT.
+
+## Module outputs
+
+`dev*.json` means the three files Dev 5 merges: `dev2.json` holds subdomains and IPs, `dev3.json` holds ports, services, and HTTP results, `dev4.json` holds URLs and JS endpoints. Phase 2 starts when all three exist and pass key checks.
+
+## Branches
+
+- main holds this overview.
+- dev1 holds the lite runner and shared flags.
+- dev3 holds the active scanner (naabu, nmap, httpx, ffuf).
+- dev5 holds the lite merge to `report.json` and `report.md`.
+- dev2 and dev4 are owned by their teams and stay untouched here.
 
 ## Deliverable
 

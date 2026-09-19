@@ -12,7 +12,7 @@ A fast, structured reconnaissance orchestrator designed to parallelize asset map
 
 - Aggressive + comprehensive active scanning
 - Maximized parallel execution for fast turnaround
-- Port sweeping, service detection (Nmap/Masscan)
+- Port sweeping, service detection (Nmap/Naabu)
 - Full active directory brute-forcing (ffuf/feroxbuster)
 - Deep JS asset extraction & live endpoint analysis
 

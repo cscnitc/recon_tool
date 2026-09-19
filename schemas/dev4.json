@@ -1,0 +1,10 @@
+[
+  {
+    "host": "portal.college.edu",
+    "urls": ["/api/v1/login", "/static/app.js"],
+    "js_endpoints": ["/static/app.js -> /api/v1/login"],
+    "params": ["?id=", "?q="],
+    "secrets_hint": ["possible key in app.js line 120, needs manual check"],
+    "source_tool": "gau+katana+linkfinder"
+  }
+]

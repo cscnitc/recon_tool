@@ -1,0 +1,15 @@
+{
+  "mode": "audit",
+  "started": "2026-09-19T10:00:00Z",
+  "scope_sha256": "REPLACE_WITH_SHA256_OF_SCOPE_TXT",
+  "inputs": {
+    "dev2.json": "REPLACE_WITH_SHA256",
+    "dev3.json": "REPLACE_WITH_SHA256",
+    "dev4.json": "REPLACE_WITH_SHA256"
+  },
+  "counts": {
+    "hosts": 1,
+    "ports": 1,
+    "urls": 1
+  }
+}

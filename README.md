@@ -37,15 +37,15 @@ If httpx finds no HTTP on a port, the `http` block is null and `dirs` stays empt
 
 ## Modes
 
-The `--mode` flag changes what this script is allowed to do.
+The `--mode` flag picks defaults, while `--rate` and `--threads` let the person running it adjust within bounds. Omit them to take mode defaults.
 
-In ctf mode the script runs the full chain: naabu for all common ports, nmap `-sV -sC` on what naabu found, httpx with tech detect and TLS probe, then ffuf with the raft wordlists. Threads and rate are high. Use this on THM, HTB, and other lab targets.
+In ctf mode the script runs the full chain: naabu for all common ports, nmap `-sV -sC` on what naabu found, httpx with tech detect and TLS probe, then ffuf with the raft wordlists. Defaults are `rate 1000, threads 100`, adjustable `100-5000` and `10-200`. Masscan (`--scanner masscan`) and feroxbuster (`--fuzzer ferox`) are ctf-only opt-ins when the binary exists, same output shape. Use this on THM, HTB, and other lab targets.
 
-In audit mode the script stays quiet. naabu is limited to the top 100 ports at `--rate 20`, nmap runs with `-T2`, httpx checks status, title, and TLS only. ffuf does not run. It exits with a note saying fuzzing was skipped. This is the setting for college infra.
+In audit mode the script stays quiet. Defaults are `rate 20, threads 10` with top 100 ports and `nmap -T2`, httpx checks status, title, and TLS only. Adjustable `rate 10-50` and `threads 5-20` freely. Above that needs `--override reason-text`, which is written to the log and report notes. ffuf does not run. This is the setting for college infra.
 
 ## Scope check
 
-`--scope` points to a file with one allowed host, domain, or CIDR per line. In audit mode the script reads it first and compares every target. A target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs.
+`--scope` points to a file with one allowed host, domain, or CIDR per line. Targets are arbitrary, examples are placeholders. A subdomain of a listed domain counts as in scope. For CIDR entries, network and broadcast addresses are skipped. IPv6 is out for v1. In audit mode the script reads it first and compares every target. A target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs.
 
 ## Layout
 

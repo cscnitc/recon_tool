@@ -1,104 +1,76 @@
-# Automated Recon Platform
+# Dev1: core engine and orchestration
 
-> **Engineering Execution Plan - 5-Developer Team**
+This branch holds the runner that ties the recon modules together. Dev2 finds subdomains, Dev3 probes ports and web hosts, Dev4 pulls URLs from JS and archives. Dev1 calls them in order and passes the same flags to each.
 
-A fast, structured reconnaissance orchestrator designed to parallelize asset mapping and deliver a single actionable report:
+This is a lite version. No Redis, no database, no API server. The full engine can replace it later without changing how Dev2, Dev3, or Dev4 are called.
 
-**Domains -> Subdomains -> IPs -> Ports -> Services -> Technologies -> URLs -> APIs -> JS Endpoints -> Paths**
+## What lives here
 
-## Operational Modes
+- `contracts.md` records the shared flags and JSON keys.
+- `schemas/` holds one example output per module.
+- `runner.py` runs dev2, then dev3, then dev4.
+- `logs/` stores one log file per run.
 
-### Mode 1: THM / HTB / CTF
+## Shared flags
 
-- Aggressive + comprehensive active scanning
-- Maximized parallel execution for fast turnaround
-- Port sweeping, service detection (Nmap/Naabu)
-- Full active directory brute-forcing (ffuf/feroxbuster)
-- Deep JS asset extraction & live endpoint analysis
+Every module uses the same four flags so the runner stays simple.
 
-### Mode 2: Real Web Scan
-
-- Non-aggressive, safe scanning posture
-- Prioritizes passive OSINT & public APIs
-- Zero direct directory brute-forcing
-- Passive port/service mapping (Shodan/Censys)
-- Basic HTTP/TLS health verification
-
-## Work Allocation Matrix
-
-| Developer | Primary Domain | Core Tools & Tech | Key Deliverables |
-|---|---|---|---|
-| **Dev 1 (Lead)** | Architecture, State & Concurrency | Go / Python, Redis, Docker | Main orchestration engine, worker queue, module loader, CLI/API config, mode enforcement |
-| **Dev 2** | Passive Discovery & OSINT | Subfinder, Amass, Crt.sh, Shodan | Subdomain discovery, CT log parser, passive IP lookup, centralized API key manager |
-| **Dev 3** | Active Scanning & Probing | Nmap, Masscan, Httpx, Ffuf | Active port scanner, HTTP probing wrapper, mode-switch controls, content fuzzer |
-| **Dev 4** | JS & API Analysis | Katana, LinkFinder, SecretFinder | Historical URL fetcher, JS static analysis engine, path/parameter extractor, secret scanner |
-| **Dev 5** | Data Pipeline & Reporting | PostgreSQL, SQLite, Jinja2 | Unified JSON schema validator, graph/tree data aggregator, JSON export & HTML dashboard |
-
-## Core Platform Architecture
-
-The platform follows this execution flow:
-
-```text
-Target IP/Domain
-      |
-      v
-[ Dev 1 Engine ]
-      |
-      v
-[ Dev 2 Passive + Dev 3 Active + Dev 4 JS Analysis ]
-      |
-      v
-[ Dev 5 Aggregator ]
-      |
-      v
-Attack Surface Map
+```
+--in targets.txt --mode ctf|audit --scope scope.txt --out out.json
 ```
 
-## Sprint Breakdown & Task Delegation
+`--mode` controls how aggressive the run is. `--scope` points to a text file with one host, domain, or CIDR per line. In audit mode the runner stops if a target is outside scope.
 
-### Developer 1: Core Engine & Orchestration
+## Module contract
 
-**Primary domain:** Core Platform & Architecture
+Each module is a Python script with a `run` function:
 
-- **Architecture & Pipeline:** Build the core execution engine utilizing an asynchronous task queue or event-driven worker pool.
-- **Mode Controller:** Enforce strict runtime execution based on operational mode:
-  - **CTF Mode:** Maximum thread pool, active port sweeps, and directory fuzzing enabled.
-  - **Passive Mode:** Rate-limiting enforced, brute-force disabled, IP queries routed to passive APIs.
-- **Module Lifecycle:** Create abstract interfaces and plugin loaders so Devs 2, 3, and 4 can register modules dynamically.
+```python
+def run(targets: list[str], mode: str, scope_file: str) -> dict
+```
 
-### Developer 2: Passive Reconnaissance Engine
+It reads the target list, writes JSON to the path given by `--out`, and returns 0 on success. It prints errors to stderr and never asks for input mid-run.
 
-**Primary domain:** OSINT & Passive Discovery
+## Modes
 
-- **Subdomain Enumeration:** Wrap and integrate subfinder, amass, and chaos with dynamic deduplication.
-- **Certificate Transparency:** Query crt.sh and certspotter APIs to discover Subject Alternative Names (SANs).
-- **Passive Asset Profiling:** Query Shodan and Censys REST APIs for open ports and banners when in safe mode.
-- **Secrets Config Manager:** Build central credential management for passive service API keys.
+ctf mode is for THM, HTB, and other lab targets. Threads are high, port sweeps and fuzzing are allowed.
 
-### Developer 3: Active Scanning & Probing Engine
+audit mode is for college infra. The runner forces low threads and a low rate. Port sweeps are limited to the top 100 ports with `nmap -T2`. Fuzzing is off unless IT approved a window and the target is listed in scope.
 
-**Primary domain:** Active Recon & Content Discovery
+## Scope and logging
 
-- **Port Scanning (CTF Mode):** Integrate naabu or masscan for fast port discovery, piping live ports to nmap for service identification (`-sV`).
-- **HTTP Probing & Tech Stacks:** Implement httpx wrapper to check host status, titles, and map technology signatures (Wappalyzer).
-- **Content Discovery (CTF Mode):** Wrap ffuf or feroxbuster with context-aware wordlists and pipe findings to Dev 5.
+scope.txt is required in audit mode. The runner checks each target against it before starting any module. Anything outside scope ends the run with an error.
 
-### Developer 4: JS & API Analysis Engine
+Each run writes to `logs/run-<date>.log` with the user, time, mode, scope file hash, and exit code of each module. Keep these logs. IT may ask what was scanned and when.
 
-**Primary domain:** Endpoint & Parameter Extraction
+## Layout
 
-- **Historical & Crawled URLs:** Aggregate legacy URLs using waybackurls, gau, and crawling with katana.
-- **JS Static Analysis:** Extract JavaScript files and pass them through LinkFinder and JSFinder to discover hidden API paths.
-- **Secret Identification:** Implement regex analysis via SecretFinder to highlight potential API keys and unlinked endpoints.
+```
+dev1/
+  runner.py
+  contracts.md
+  schemas/
+    dev2.json
+    dev3.json
+    dev4.json
+  logs/
+```
 
-### Developer 5: Data Pipeline, Aggregation & Reporting
+## How to run
 
-**Primary domain:** Data Normalization & Dashboards
+```bash
+python runner.py --in targets.txt --mode audit --scope scope.txt --out-dir ./out
+python runner.py --in targets.txt --mode ctf --scope scope.txt --out-dir ./out
+```
 
-- **Data Aggregation Engine:** Ingest concurrent data feeds from Devs 2, 3, and 4 into a unified node graph.
-- **Data Validation & Schema:** Enforce strict JSON schema validation for all intermediate tool outputs.
-- **Reporting Suite:** Generate structured JSON outputs and an interactive HTML attack-surface dashboard.
+Output lands in `./out/dev2.json`, `./out/dev3.json`, `./out/dev4.json`. Dev5 merges them later.
 
-## Deliverable
+## For Dev2, Dev3, Dev4
 
-The final system is intended to consolidate parallel reconnaissance results into a unified, actionable **attack surface map**, with structured JSON output and an interactive HTML dashboard.
+Build your script so it works alone first:
+
+```bash
+python ../dev3/dev3.py --in targets.txt --mode ctf --scope scope.txt --out dev3.json
+```
+
+If it runs alone with these four flags, the runner can pick it up with no changes.

@@ -112,7 +112,8 @@ v1 is a lite Python merge (see `dev5` branch). No Postgres, no hosted dashboard.
 - dev1 holds the lite runner and shared flags.
 - dev3 holds the active scanner (naabu, nmap, httpx, ffuf).
 - dev5 holds the lite merge to `report.json` and `report.md`.
-- dev2 and dev4 are owned by their teams and stay untouched here.
+- dev2 covers passive subdomains and IPs, details live in that branch.
+- dev4 covers URLs and JS endpoints, details live in that branch.
 
 ## Deliverable
 

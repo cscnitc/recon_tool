@@ -1,0 +1,53 @@
+                 DEV2
+                   │
+                   ▼
+            1. Git / branch
+                   │
+                   ▼
+          2. Understand schema
+                   │
+                   ▼
+              3. CLI
+                   │
+                   ▼
+             4. Read input
+                   │
+                   ▼
+          5. Audit scope check
+                   │
+                   ▼
+             6. Subfinder
+                   │
+                   ▼
+               7. Chaos
+                   │
+                   ▼
+               8. crt.sh
+                   │
+                   ▼
+            9. Certspotter
+                   │
+                   ▼
+           10. Deduplication
+                   │
+                   ▼
+               11. dnsx
+                   │
+                   ▼
+            12. dev2.json
+                   │
+                   ▼
+          13. Error handling
+                   │
+                   ▼
+             14. --extended
+                   │
+                   ▼
+               15. Docker
+                   │
+                   ▼
+            16. Final testing
+                   │
+                   ▼
+             17. Push / PR
+

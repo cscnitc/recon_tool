@@ -1,0 +1,10 @@
+# Real scope and keys stay local; only *.example.* is tracked.
+scope.txt
+keys.env
+# Runtime outputs
+out/
+report/
+logs/
+# Python
+__pycache__/
+.venv/

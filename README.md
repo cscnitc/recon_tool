@@ -37,11 +37,11 @@ Targets are arbitrary. Examples use college names as placeholders. Any domain, I
 
 | Developer | Primary Domain | Core Tools & Tech | Key Deliverables |
 |---|---|---|---|
-| **Dev 1 (Lead)** | Architecture, State & Concurrency | Python, Docker (lite v1, no Redis) | Runner with shared flags, scope check, mode enforcement, log per run |
+| **Dev 1 (Lead)** | Architecture, State & Concurrency | Python stdlib-only (no Docker image, no Redis) | Runner with shared flags, scope check, mode enforcement, log per run |
 | **Dev 2** | Passive Discovery & OSINT | Python, Subfinder, Chaos free, Crt.sh, Dnsx (BYO-key optional, amass only on --extended) | Subdomain find, resolve, and dedupe to dev2.json with the same 4 flags |
 | **Dev 3** | Active Scanning & Probing | Naabu, Nmap, Httpx, Ffuf (masscan or ferox only as ctf opt-in) | Naabu to Nmap service scan, httpx tech probe, mode-gated ffuf fuzzer |
 | **Dev 4** | JS & API Analysis | Python, Gau, Waybackurls, Katana, LinkFinder, SecretFinder | Archive plus crawl to dev4.json with the same 4 flags, shallow only in audit |
-| **Dev 5** | Data Pipeline & Reporting | Python, SQLite, JSON/Markdown (lite v1) | Schema check, merge to report.json/md, run metadata (DB and HTML dashboard in v2) |
+| **Dev 5** | Data Pipeline & Reporting | Python, JSON/Markdown flat files (v1; SQLite/Postgres deferred to v2) | Schema check, merge to report.json/md, run metadata (DB and HTML dashboard in v2) |
 
 ## Core Platform Architecture
 
@@ -74,7 +74,7 @@ v1 is a lite Python runner (see `dev1` branch). No Redis, no database. The full 
 - **Mode Controller:** Enforce strict runtime execution based on operational mode:
   - **CTF Mode:** High threads, active port sweeps, and directory fuzzing enabled.
   - **Audit Mode:** Low rate (`nmap -T2`, top 100 ports), fuzzing off, `scope.txt` required. Anything outside scope stops the run.
-- **Module Lifecycle:** Each module exposes `run(targets, mode, scope_file)` and writes JSON. The runner logs user, time, mode, and exit code per module.
+- **Module Lifecycle:** Each module exposes `run(targets, mode, scope_file, out)` (see `contracts.md` Function shape) and writes JSON. The runner logs user, time, mode, and exit code per module.
 
 ### Developer 2: Passive Reconnaissance Engine
 
@@ -115,6 +115,62 @@ v1 is a lite Python merge (see `dev5` branch). No Postgres, no hosted dashboard.
 ## Module outputs
 
 `dev*.json` means the three files Dev 5 merges: `dev2.json` holds subdomains and IPs, `dev3.json` holds ports, services, and HTTP results, `dev4.json` holds URLs and JS endpoints. Phase 2 starts when all three exist and pass key checks.
+
+## File structures (v1 build, recommended set)
+
+`main` is the authority for these trees. `dev1/dev2/dev4/dev5` branches are not edited here; they adopt these trees on next pull. `scope.py` is a copy per `dev1-4` for standalone runs (dedupe deferred to v2). `parsers.py` is never shared. `Dockerfile` exists only for `dev2/dev3/dev4`. No `tests/`, no `docs/`, no `runners/`, no `requirements.txt` (stdlib-only), no SQLite in v1.
+
+```text
+/ (main)
+  README.md              # this overview + all trees below
+  contracts.md           # flags, rates, scope, keys, function shape, required keys, logging
+  keys.example.env       # SHODAN/CHAOS/CENSYS placeholders (real keys.env gitignored)
+  scope.example.txt      # example scope (real scope.txt gitignored)
+  schemas/               # dev2.json dev3.json dev4.json report.json run-meta.json examples
+  .gitignore             # keys.env scope.txt out/ report/ logs/ __pycache__/ .venv/
+```
+
+```text
+dev1/ (lite runner, stdlib-only, no Docker image)
+  runner.py              # subprocess dev2->dev3->dev4, same flags, mode/rate/override gate, exit-code log
+  scope.py               # COPY of main scope rule; audit fail-closed before any module
+  contracts.md           # frozen copy for standalone branch use
+  schemas/               # dev2.json dev3.json dev4.json copies for local testing
+  logs/.gitkeep          # per-run run-<ISO>.log (user,time,mode,rate/threads,override,scope-sha,exits)
+```
+
+```text
+dev2/ (passive, Docker)
+  dev2.py                # CLI --in --mode --scope --out [--extended]; subfinder->chaos->crt.sh->certspotter->dedupe->dnsx->[amass if --extended+ctf]
+  scope.py               # COPY; audit check before any lookup batch
+  parsers.py             # normalize all sources -> {host,ips,source_tool}; SAN parse + dedupe
+  Dockerfile             # subfinder+chaos+dnsx+amass; crt.sh/certspotter via python/curl
+  keys.example.env       # copy; real keys.env gitignored, fallback crt.sh-only + note
+```
+
+```text
+dev3/ (active, Docker; see dev3 branch README for full tree)
+  dev3.py                # CLI 4 flags + --rate --threads --override --scanner --fuzzer; naabu->nmap -sV -sC->httpx->[ffuf ctf-only]
+  scope.py               # COPY; audit stop before any packet, ctf lenient warn-continue
+  parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}
+  wordlists/raft-small.txt  # placeholder + source URL comment (no large commit)
+  Dockerfile             # naabu+nmap+httpx+ffuf; masscan/ferox detected, fallback+note if missing
+```
+
+```text
+dev4/ (JS/API, Docker)
+  dev4.py                # CLI 4 flags; gau+waybackurls->katana(depth<=2 audit)->LinkFinder->SecretFinder
+  scope.py               # COPY; same audit gate
+  parsers.py             # -> {host,urls,js_endpoints,params[str],secrets_hint[str],source_tool}
+  Dockerfile             # gau+waybackurls+katana+LinkFinder+SecretFinder
+```
+
+```text
+dev5/ (merge, stdlib-only, no Docker image, flat files only)
+  merge.py               # --in ./out --out ./report; join dev2/3/4 on host|ip-fallback; write report.json/md + run-meta.json
+  validate.py            # required-keys+types check; skip bad w/ file:line, allow extra keys; redact secrets from .md
+  schemas/               # dev2.json dev3.json dev4.json copies for local validation
+```
 
 ## Branches
 

@@ -1,7 +1,14 @@
 {
   "mode": "audit",
   "started": "2026-09-19T10:00:00Z",
+  "finished": "REPLACE_WITH_ISO_FINISH_TIME",
   "scope_sha256": "REPLACE_WITH_SHA256_OF_SCOPE_TXT",
+  "effective_rate": 20,
+  "effective_threads": 10,
+  "override": {
+    "used": false,
+    "reason": null
+  },
   "inputs": {
     "dev2.json": "REPLACE_WITH_SHA256",
     "dev3.json": "REPLACE_WITH_SHA256",

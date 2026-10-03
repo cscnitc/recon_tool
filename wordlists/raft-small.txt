@@ -1,0 +1,4 @@
+# Placeholder raft-small subset. Full list: https://github.com/danielmiessler/SecLists (raft-small-words.txt).
+# Keep the real wordlist local; only this pointer is tracked.
+/admin
+/api/v1/login

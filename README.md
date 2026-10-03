@@ -47,18 +47,21 @@ In audit mode the script stays quiet. Defaults are `rate 20, threads 10` with to
 
 `--scope` points to a file with one allowed host, domain, or CIDR per line. Targets are arbitrary, examples are placeholders. A subdomain of a listed domain counts as in scope. For CIDR entries, network and broadcast addresses are skipped. IPv6 is out for v1. In audit mode the script reads it first and compares every target. A target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs.
 
-## Layout
+## Layout (v1 build, recommended set)
 
-```
+```text
 dev3/
-  dev3.py
-  scope.py
-  parsers.py
-  wordlists/
-  Dockerfile
+  dev3.py                # CLI --in/--mode/--scope/--out/--rate/--threads/--override/--scanner/--fuzzer; naabu->nmap -sV -sC->httpx->[ffuf ctf-only]
+  scope.py               # COPY of main scope rule; audit stop before any packet, ctf lenient warn-continue
+  parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}
+  wordlists/raft-small.txt  # placeholder + source URL comment (no large commit)
+  Dockerfile             # naabu+nmap+httpx+ffuf; masscan/ferox detected, fallback+note if missing
+  .gitignore             # out/, *.json, keys.env, __pycache__/, .venv/
 ```
 
-`dev3.py` handles flags and calls each step. `scope.py` holds the scope check. `parsers.py` converts nmap, naabu, httpx, and ffuf output into the JSON above.
+No `tests/`, no `requirements.txt` (stdlib-only), no `runners/` split in v1 lite.
+
+`dev3.py` handles flags and calls each step. `scope.py` holds the scope check. `parsers.py` converts nmap, naabu, httpx, and ffuf output into the JSON above. `ffuf` stays off in audit mode (`dirs==[]`, `http==null` when no HTTP).
 
 ## How to run
 

@@ -1,0 +1,7 @@
+# Dev3 local ignores (branch-level).
+out/
+*.json
+!schemas/*.json
+__pycache__/
+.venv/
+keys.env

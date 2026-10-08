@@ -5,6 +5,7 @@ import ipaddress
 import json
 import logging
 import sys
+import subprocess
 from pathlib import Path
 
 
@@ -372,6 +373,54 @@ def expand_targets(
 # ---------------------------------------------------------
 # Dev2 function
 # ---------------------------------------------------------
+def run_subfinder(domain: str) -> list[str]:
+    """Run Subfinder in Docker and return discovered subdomains."""
+
+    command = [
+        "sudo",
+        "docker",
+        "run",
+        "--rm",
+        "projectdiscovery/subfinder:latest",
+        "-d",
+        domain,
+        "-silent",
+        "-timeout",
+        "5",
+        "-max-time",
+        "1",
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=75,
+        )
+
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"Subfinder timed out for {domain}"
+        )
+
+    if result.returncode != 0:
+        error = result.stderr.strip()
+
+        raise RuntimeError(
+            f"Subfinder failed for {domain}: {error}"
+        )
+
+    subdomains = []
+
+    for line in result.stdout.splitlines():
+
+        line = normalize_host(line)
+
+        if line:
+            subdomains.append(line)
+
+    return sorted(set(subdomains))
 
 def run(
     targets: list[str],
@@ -380,16 +429,6 @@ def run(
 ) -> dict:
     """
     Dev2 module entry point.
-
-    Required contract:
-
-        def run(
-            targets: list[str],
-            mode: str,
-            scope_file: str
-        ) -> dict
-
-    Actual recon integrations will be added here.
     """
 
     if mode not in {"ctf", "audit"}:
@@ -399,16 +438,15 @@ def run(
 
     scope_entries = read_lines(scope_file)
 
-    # IMPORTANT:
-    # Audit scope check happens BEFORE any lookup.
+    # Audit scope check happens before any lookup.
     if mode == "audit":
-
         validate_targets_in_scope(
             targets,
             scope_entries
         )
 
     results = []
+    seen_hosts = set()
 
     for target in targets:
 
@@ -416,16 +454,42 @@ def run(
         # we already know its IP.
         target_ip = parse_ipv4(target)
 
-        results.append(
-            {
-                "host": target,
-                "ips": (
-                    [str(target_ip)]
-                    if target_ip
-                    else []
-                ),
-            }
-        )
+        if target_ip is not None:
+
+            host = str(target_ip)
+
+            if host not in seen_hosts:
+                seen_hosts.add(host)
+
+                results.append(
+                    {
+                        "host": host,
+                        "ips": [host],
+                        "source_tool": "input",
+                    }
+                )
+
+            continue
+
+        # Run Subfinder for domain targets.
+        subdomains = run_subfinder(target)
+
+        for subdomain in subdomains:
+
+            subdomain = normalize_host(subdomain)
+
+            if subdomain in seen_hosts:
+                continue
+
+            seen_hosts.add(subdomain)
+
+            results.append(
+                {
+                    "host": subdomain,
+                    "ips": [],
+                    "source_tool": "subfinder",
+                }
+            )
 
     return {
         "results": results

@@ -4,7 +4,7 @@
 # are ctf-only opt-ins. Any missing binary -> run continues on defaults with a
 # stderr "note:" (same JSON shape, exit 0). Root is intentional: naabu SYN scan
 # needs privs; without root it falls back to connect scan (slower, fine small scope).
-FROM kalilinux/kali-rolling-slim
+FROM kalilinux/kali-rolling
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 nmap ffuf curl ca-certificates \

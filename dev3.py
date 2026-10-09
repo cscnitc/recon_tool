@@ -5,6 +5,7 @@ Stdlib-only. Missing binaries fall back with a note (per contracts.md).
 Audit: nmap -T2 top-100, ffuf off. Ctf: full chain, masscan/ferox opt-in.
 """
 import argparse
+import ipaddress
 import json
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ from parsers import (
     build_record,
     parse_ffuf_paths,
     parse_httpx_jsonl,
+    parse_masscan_oL,
     parse_naabu_ports,
     parse_nmap_records,
 )
@@ -39,6 +41,8 @@ def resolve_rates(mode, rate, threads, override):
         print(f"error: ctf rate {rate} out of {r_lo}-{r_hi} or threads {threads} out of {t_lo}-{t_hi} (no override in ctf)",
               file=sys.stderr)
         raise SystemExit(2)
+    if mode == "ctf" and override:
+        notes.append("--override ignored in ctf mode (no override in ctf)")
     if mode == "audit" and (rate < r_lo or threads < t_lo):
         print(f"error: audit rate/threads below min ({r_lo}/{t_lo})", file=sys.stderr)
         raise SystemExit(2)
@@ -63,9 +67,9 @@ def discover_ports(targets, mode, rate, threads, scanner, notes):
         elif shutil.which("masscan") is None:
             notes.append("masscan binary missing, using naabu defaults")
         else:
-            out, code = _run(["masscan"] + targets + ["-p1-65535", f"--rate={rate}"])
-            if code != 127:
-                return parse_naabu_ports(out)
+            out, code = _run(["masscan"] + targets + ["-p1-65535", f"--rate={rate}", "-oL", "-"])
+            if code == 0:
+                return parse_masscan_oL(out)
             notes.append("masscan failed, using naabu defaults")
     if shutil.which("naabu") is None:
         notes.append("naabu binary missing, port discovery skipped (no records without tool output)")
@@ -115,6 +119,55 @@ def probe_http(recs, mode, threads, notes):
     return parse_httpx_jsonl(out)
 
 
+def _norm_host(h):
+    """Normalize a host for httpx<->nmap matching: lower, strip scheme/path/port.
+
+    Mirrors scope.py hostname tolerance (lower + trailing-dot strip)."""
+    s = (h or "").strip().lower()
+    if "://" in s:
+        s = s.split("://", 1)[1]
+    s = s.split("/")[0]
+    if s.count(":") == 1 and not s.startswith("["):
+        s = s.split(":")[0]
+    return s.rstrip(".")
+
+
+def _attribute_http(finger, http_raw, notes):
+    """Map raw {(httpx_host, port): http} onto finger records keyed by nmap host.
+
+    Normalized match first; unmatched answers are attributed by port to an
+    nmap record (keeping nmap host spelling byte-for-byte from --in) with a
+    mismatch note, so fuzzing is never silently skipped. Port-less answers
+    attach only on a single-host match, else dropped with a note."""
+    http_map = {}
+    unmatched = []
+    for (rh, p), http in http_raw.items():
+        hit = next((r for r in finger
+                    if _norm_host(r["host"]) == _norm_host(rh) and r["port"] == p), None)
+        if hit:
+            http_map[(hit["host"], hit["port"])] = http
+        else:
+            unmatched.append((rh, p, http))
+    for rh, p, http in unmatched:
+        if p is not None:
+            cands = [r for r in finger if r["port"] == p and (r["host"], r["port"]) not in http_map]
+            if cands:
+                tgt = cands[0]
+                http_map[(tgt["host"], tgt["port"])] = http
+                notes.append(f"http host mismatch ({rh}), attributed to {tgt['host']}:{tgt['port']}")
+            else:
+                notes.append(f"http answer for unknown host dropped ({rh}:{p})")
+        else:
+            cands = [r for r in finger if _norm_host(r["host"]) == _norm_host(rh)
+                     and (r["host"], r["port"]) not in http_map]
+            if len(cands) == 1:
+                tgt = cands[0]
+                http_map[(tgt["host"], tgt["port"])] = http
+            else:
+                notes.append(f"http answer without port dropped ({rh})")
+    return http_map
+
+
 def fuzz_dirs(live, mode, fuzzer, threads, notes):
     """ffuf in ctf only. Returns {(host,port): [dirs]}."""
     if mode != "ctf":
@@ -150,9 +203,8 @@ def run(targets, mode, scope_file, out, rate=None, threads=None, override=None,
 
     ports = discover_ports(kept, mode, rate, threads, scanner, notes)
     finger = fingerprint(ports, mode, notes)
-    # Map host->ip best effort: keep host as ip when target was an IP literal.
-    import ipaddress
-
+    # ip rule (v1 law): IP literal -> same string; hostname -> "". Never copy
+    # hostname into ip (Dev2 owns DNS truth); Dev5 joins on host primary.
     def as_ip(h):
         try:
             ipaddress.ip_address(h)
@@ -160,22 +212,27 @@ def run(targets, mode, scope_file, out, rate=None, threads=None, override=None,
         except ValueError:
             return ""
 
-    http_map = probe_http(finger, mode, threads, notes)
+    http_raw = probe_http(finger, mode, threads, notes)
+    http_map = _attribute_http(finger, http_raw, notes)
     live = [(r["host"], r["port"]) for r in finger if (r["host"], r["port"]) in http_map]
     # Audit: ffuf stays off even if live hosts exist.
     fuzz_map = fuzz_dirs(live, mode, fuzzer, threads, notes) if mode == "ctf" else {}
 
     records = []
+    have_nmap = shutil.which("nmap") is not None
+    have_httpx = shutil.which("httpx") is not None
     for r in finger:
         key = (r["host"], r["port"])
         http = http_map.get(key)
         dirs = fuzz_map.get(key, [])
         if mode == "audit":
             dirs = []
-        tools = ["nmap", "httpx"] + (["ffuf" if (fuzzer != "ferox") else "ferox"] if key in fuzz_map else [])
-        records.append(build_record(r["host"], as_ip(r["host"]) or r["host"], r["port"],
+        # source_tool reflects what actually ran (honest provenance, no skipped: token).
+        tools = (["nmap"] if have_nmap else []) + (["httpx"] if have_httpx else [])
+        tools += (["ferox" if fuzzer == "ferox" else "ffuf"] if key in fuzz_map else [])
+        records.append(build_record(r["host"], as_ip(r["host"]) or "", r["port"],
                                     r["service"], r.get("banner", ""), http, dirs,
-                                    source_tool="+".join(tools)))
+                                    source_tool="+".join(tools) or "none"))
     payload = records
     with open(out, "w") as f:
         json.dump(payload, f, indent=2)

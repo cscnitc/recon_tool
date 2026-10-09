@@ -7,6 +7,7 @@ Audit: nmap -T2 top-100, ffuf off. Ctf: full chain, masscan/ferox opt-in.
 import argparse
 import ipaddress
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,26 @@ from parsers import (
     parse_nmap_records,
 )
 from scope import check_targets
+
+
+def _validate_path(path, label):
+    """Reject empty/NUL/'..' traversal components; return normalized path."""
+    if not path:
+        print(f"error: {label} path is empty", file=sys.stderr)
+        raise SystemExit(2)
+    if "\x00" in path:
+        print(f"error: {label} path contains NUL byte", file=sys.stderr)
+        raise SystemExit(2)
+
+    raw_parts = path.split(os.sep)
+    norm_parts = os.path.normpath(path).split(os.sep)
+
+    if os.pardir in raw_parts or os.pardir in norm_parts:
+        print(f"error: {label} path contains '..' traversal: {path}", file=sys.stderr)
+        raise SystemExit(2)
+
+    return os.path.normpath(path)
+
 
 DEFAULTS = {"audit": (20, 10), "ctf": (1000, 100)}
 BOUNDS = {"audit": ((10, 50), (5, 20)), "ctf": ((100, 5000), (10, 200))}
@@ -266,6 +287,9 @@ def main(argv=None):
     ap.add_argument("--scanner", default=None, choices=["masscan"], help="ctf-only opt-in")
     ap.add_argument("--fuzzer", default=None, choices=["ferox"], help="ctf-only opt-in")
     a = ap.parse_args(argv)
+    a.in_file = _validate_path(a.in_file, "--in")
+    a.scope = _validate_path(a.scope, "--scope")
+    a.out = _validate_path(a.out, "--out")
     with open(a.in_file) as f:
         targets = [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
     return run(targets, a.mode, a.scope, a.out, rate=a.rate, threads=a.threads,

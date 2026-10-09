@@ -80,6 +80,8 @@ docker run --rm -v $(pwd)/out:/out csc-recon:dev3 \
 
 naabu needs privileges for SYN scan. Without root it falls back to connect scan, which is slower but fine for small scopes.
 
+**Path handling:** `--in`, `--scope`, and `--out` reject any path containing `..` traversal components (raw or normalized). Absolute paths and symlinks are permitted as operator-controlled CLI inputs.
+
 ## Build order
 
 I built httpx first because it is safe and feeds everything else. Then nmap parsing. Then the mode gate and scope check. ffuf came last since it needs live HTTP hosts from the earlier steps. If you pick this branch up, test in that same order.

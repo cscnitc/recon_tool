@@ -15,7 +15,7 @@ def parse_naabu_ports(text):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        m = re.match(r"^(.+):(\d+)\s*$", line)
+        m = re.match(r"^(.+):(\d+)\s*$", line) if ":" in line else None
         if m:
             out.add((m.group(1), int(m.group(2))))
     return out
@@ -30,7 +30,7 @@ def parse_masscan_oL(text):
     out = set()
     for line in text.splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith("#") or not line.startswith("open"):
             continue
         m = re.match(r"^open\s+(tcp|udp)\s+(\d+)\s+(\S+)", line)
         if m:
@@ -97,46 +97,61 @@ def parse_ffuf_paths(text):
     """Parse ffuf stdout paths (/admin, /api/...) -> list of unique dirs.
 
     Slash-tolerant: accepts 'admin' and '/admin', emits normalized '/admin'.
-    A leading bare word (ffuf finding line when the wordlist lacks leading
-    slashes) counts only with finding evidence ('[Status' marker or '/' in
-    the token); pure status codes and metadata lines fall through to the
-    /path search or are skipped. Best-effort, never throws."""
+    Finding-anchored: tokens directly preceding a '[Status:' marker are
+    findings (de-glued from '\\r'/progress prefixes); URL tokens use the
+    authority-strip rule. Lines without findings, URLs, or a leading /path
+    (banners, config echoes, wordlist comments, progress chatter) are
+    skipped. Best-effort, never throws."""
     dirs = []
     seen = set()
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        first = s.split()[0].rstrip(",").rstrip(":")
-        path = None
-        if first.startswith("/"):
-            path = first
-        elif (re.match(r"^[A-Za-z0-9._~\-]+(/[A-Za-z0-9._~\-]*)*$", first)
-                and not first.isdigit()
-                and ("/" in first or "[Status" in s)):
-            path = "/" + first.lstrip("/")
-        else:
-            m = re.search(r"(/\S*)", s)
-            if not m:
-                continue
-            raw = m.group(1).rstrip(",").rstrip(":")
+
+    def emit(raw):
+        raw = raw.strip().rstrip(",").rstrip(":").lstrip(":")
+        if not raw or raw.startswith("#") or "\\" in raw:
+            return  # comments and banner ASCII art are never findings
+        raw = re.sub(r"^https?://", "//", raw)
+        if raw.startswith("//"):
+            # URL form (ferox 'http://host/path'): drop authority, keep path
+            segs = raw.split("/")
+            rest = [g for g in segs[3:] if g]
+            if not rest:
+                return
+            path = "/" + "/".join(rest)
+        elif raw.startswith("/"):
             if "[" in raw or "]" in raw:
-                continue  # bracket fractions like [1/2], not paths
-            if raw.startswith("//"):
-                # URL form (ferox 'http://host/path'): drop authority, keep path
-                segs = raw.split("/")
-                rest = [g for g in segs[3:] if g]
-                if not rest:
-                    continue
-                path = "/" + "/".join(rest)
-            else:
-                path = raw
+                return  # bracket fractions like [1/2], not paths
+            path = raw
+        elif (not raw.isdigit() and len(raw) < 2048
+                and all(c.isascii() and (c.isalnum() or c in "._~-/") for c in raw)):
+            path = "/" + raw.lstrip("/")
+        else:
+            return
         path = "/" + path.lstrip("/")
-        if path == "/":
-            continue
+        if path in ("/", "/FUZZ"):
+            return  # root is not a finding; FUZZ is ffuf's placeholder keyword
         if path not in seen:
             seen.add(path)
             dirs.append(path)
+
+    for line in text.replace("\r", "\n").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        # Substring precheck keeps findall linear (no ReDoS on long lines).
+        cands = re.findall(r"([^\s]+)\s+\[Status:", s) if "[Status:" in s else []
+        if cands:
+            for c in cands:
+                emit(c)
+            continue
+        if "://" in s:
+            m = re.search(r"(https?://\S*)", s)
+            if m:
+                emit(m.group(1).rstrip(".,;\"'"))
+            continue
+        first = s.split()[0]
+        if first.startswith("/"):
+            emit(first)
+        # Anything else (banner art, config echoes, progress chatter) is skipped.
     return dirs
 
 

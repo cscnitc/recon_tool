@@ -49,9 +49,9 @@ def resolve_rates(mode, rate, threads, override):
     return rate, threads, notes
 
 
-def _run(cmd, timeout=300):
+def _run(cmd, timeout=300, input=None):
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=input)
         return p.stdout + p.stderr, p.returncode
     except FileNotFoundError:
         return "", 127
@@ -70,14 +70,17 @@ def discover_ports(targets, mode, rate, threads, scanner, notes):
             out, code = _run(["masscan"] + targets + ["-p1-65535", f"--rate={rate}", "-oL", "-"])
             if code == 0:
                 return parse_masscan_oL(out)
-            notes.append("masscan failed, using naabu defaults")
+            notes.append(f"masscan discovery failed (exit {code}), using naabu defaults")
     if shutil.which("naabu") is None:
         notes.append("naabu binary missing, port discovery skipped (no records without tool output)")
         return set()
     top = ["-top-ports", "100"] if mode == "audit" else ["-top-ports", "1000"]
-    out, code = _run(["naabu", "-list", ",".join(targets)] + top + ["-rate", str(rate)])
-    if code == 127:
-        notes.append("naabu failed to run, port discovery skipped")
+    # Residual (documented, not fixed): comma-joined targets share one argv slot;
+    # a comma inside a target could add scan hosts. No shell involved (list argv)
+    # and the scope gate remains the control.
+    out, code = _run(["naabu", "-host", ",".join(targets)] + top + ["-rate", str(rate)])
+    if code != 0:
+        notes.append(f"naabu discovery failed (exit {code}), port discovery skipped")
         return set()
     return parse_naabu_ports(out)
 
@@ -112,11 +115,18 @@ def probe_http(recs, mode, threads, notes):
     targets = [f"{r['host']}:{r['port']}" for r in recs]
     if not targets:
         return {}
-    out, code = _run(["httpx", "-json", "-threads", str(threads), "-tls-probe", "-tech-detect"] + targets)
+    out, code = _run(["httpx", "-json", "-threads", str(threads), "-tls-probe", "-tech-detect"],
+                     input="\n".join(targets) + "\n")
     if code == 127:
         notes.append("httpx failed to run, http probe skipped")
         return {}
-    return parse_httpx_jsonl(out)
+    if code != 0:
+        notes.append(f"httpx probe failed (exit {code}), http probe skipped (http=null)")
+        return {}
+    parsed = parse_httpx_jsonl(out)
+    if not parsed:
+        notes.append("httpx returned no results, http probe skipped (http=null)")
+    return parsed
 
 
 def _norm_host(h):
@@ -174,7 +184,8 @@ def fuzz_dirs(live, mode, fuzzer, threads, notes):
         return {}
     if not live:
         return {}
-    tool = fuzzer if fuzzer == "ferox" else "ffuf"
+    # F1: probe the binary actually executed (feroxbuster), not the flag label.
+    tool = "feroxbuster" if fuzzer == "ferox" else "ffuf"
     if shutil.which(tool) is None:
         notes.append(f"{tool} binary missing, fuzzing skipped")
         return {}

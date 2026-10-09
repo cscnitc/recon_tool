@@ -33,19 +33,19 @@ Output is `dev3.json`, one record per port. Dev5 reads this file directly.
 }
 ```
 
-If httpx finds no HTTP on a port, the `http` block is null and `dirs` stays empty.
+If httpx finds no HTTP on a port, the `http` block is null and `dirs` stays empty. `ip` is an empty string for hostnames. `source_tool` lists only tools that actually ran (can be `none`).
 
 ## Modes
 
 The `--mode` flag picks defaults, while `--rate` and `--threads` let the person running it adjust within bounds. Omit them to take mode defaults.
 
-In ctf mode the script runs the full chain: naabu for all common ports, nmap `-sV -sC` on what naabu found, httpx with tech detect and TLS probe, then ffuf with the raft wordlists. Defaults are `rate 1000, threads 100`, adjustable `100-5000` and `10-200`. Masscan (`--scanner masscan`) and feroxbuster (`--fuzzer ferox`) are ctf-only opt-ins when the binary exists, same output shape. Use this on THM, HTB, and other lab targets.
+In ctf mode the script runs the full chain: naabu for all common ports, nmap `-sV -sC` on what naabu found, httpx with tech detect and TLS probe, then ffuf with the raft wordlists. Defaults are `rate 1000, threads 100`, adjustable `100-5000` and `10-200`. Masscan (`--scanner masscan`) and feroxbuster (`--fuzzer ferox`) are ctf-only opt-ins when the binary exists, same output shape. Use this on THM, HTB, and other lab targets. ctf with `--override` is ignored with a note; empty discovery exits 0 with a note.
 
 In audit mode the script stays quiet. Defaults are `rate 20, threads 10` with top 100 ports and `nmap -T2`, httpx checks status, title, and TLS only. Adjustable `rate 10-50` and `threads 5-20` freely. Above that needs `--override reason-text`, which is written to the log and report notes. ffuf does not run. This is the setting for college infra.
 
 ## Scope check
 
-`--scope` points to a file with one allowed host, domain, or CIDR per line. Targets are arbitrary, examples are placeholders. A subdomain of a listed domain counts as in scope. For CIDR entries, network and broadcast addresses are skipped. IPv6 is out for v1. In audit mode the script reads it first and compares every target. A target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs.
+`--scope` points to a file with one allowed host, domain, or CIDR per line. Targets are arbitrary, examples are placeholders. A subdomain of a listed domain counts as in scope. For CIDR entries, network and broadcast addresses are skipped. IPv6 is out for v1. In audit mode the script reads it first and compares every target. A target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs. CIDR-as-target exits 2 in both modes; IPv6 is dropped even in ctf.
 
 ## Layout (v1 build, recommended set)
 
@@ -55,8 +55,8 @@ dev3/
   scope.py               # COPY of main scope rule; audit stop before any packet, ctf lenient warn-continue
   parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}
   wordlists/raft-small.txt  # placeholder + source URL comment (no large commit)
-  Dockerfile             # naabu+nmap+httpx+ffuf; masscan/ferox detected, fallback+note if missing
-  .gitignore             # out/, *.json, keys.env, __pycache__/, .venv/
+  Dockerfile             # nmap+ffuf via apt; naabu/httpx manual installs (Go), masscan/ferox absent-by-design with fallback+note
+  .gitignore             # scope.txt keys.env out/ report/ logs/ __pycache__/ .venv/
 ```
 
 No `tests/`, no `requirements.txt` (stdlib-only), no `runners/` split in v1 lite.

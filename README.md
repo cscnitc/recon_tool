@@ -39,7 +39,7 @@ Targets are arbitrary. Examples use college names as placeholders. Any domain, I
 |---|---|---|---|
 | **Dev 1 (Lead)** | Architecture, State & Concurrency | Python stdlib-only (no Docker image, no Redis) | Runner with shared flags, scope check, mode enforcement, log per run |
 | **Dev 2** | Passive Discovery & OSINT | Python, Subfinder, Chaos free, Crt.sh, Dnsx (BYO-key optional, amass only on --extended) | Subdomain find, resolve, and dedupe to dev2.json with the same 4 flags |
-| **Dev 3** | Active Scanning & Probing | Naabu, Nmap, Httpx, Ffuf (masscan or ferox only as ctf opt-in) | Naabu to Nmap service scan, httpx tech probe, mode-gated ffuf fuzzer |
+| **Dev 3** | Active Scanning & Probing | Nmap, Ffuf (apt); Naabu, Httpx manual install; masscan/ferox ctf opt-in | Naabu (-host CSV) → Nmap (-sV -sC) → Httpx (stdin) → ffuf/ferox ctf-only |
 | **Dev 4** | JS & API Analysis | Python, Gau, Waybackurls, Katana, LinkFinder, SecretFinder | Archive plus crawl to dev4.json with the same 4 flags, shallow only in audit |
 | **Dev 5** | Data Pipeline & Reporting | Python, JSON/Markdown flat files (v1; SQLite/Postgres deferred to v2) | Schema check, merge to report.json/md, run metadata (DB and HTML dashboard in v2) |
 
@@ -89,10 +89,17 @@ Stack is Python with subfinder, chaos free, crt.sh and certspotter, plus dnsx fo
 
 **Primary domain:** Active Recon & Content Discovery
 
-Stack is Python with naabu, nmap, httpx, and ffuf in Docker (see `dev3` branch). Same four flags plus optional `--rate` and `--threads`. Output is `dev3.json`, one record per port (see `schemas/`).
-- **Port Scanning:** Run naabu for fast discovery, pipe live ports to nmap for service identification (`-sV -sC`). Defaults are audit `rate 20, threads 10` and ctf `rate 1000, threads 100`. Audit allows `10-50` and `5-20` freely, above that needs `--override reason-text` which is written to the log and report notes. Ctf allows `100-5000` and `10-200`. Masscan is a ctf-only opt-in via `--scanner masscan` when the binary exists, same output shape.
-- **HTTP Probing & Tech Stacks:** Use the httpx wrapper with tech detect and TLS probe to record status, title, and tech. No separate Wappalyzer step.
-- **Content Discovery:** Use ffuf with raft wordlists in ctf mode. It stays off in audit mode. Feroxbuster is a ctf-only opt-in via `--fuzzer ferox` when the binary exists. Findings go to Dev 5 as `dev3.json`.
+Stack is Python with nmap, ffuf (apt in kali-rolling); naabu, httpx (manual Go installs, fallback+note if missing); masscan, feroxbuster (ctf opt-ins). Same four flags plus `--rate`, `--threads`, `--override`, `--scanner`, `--fuzzer`. Output is `dev3.json`, one record per port (see `schemas/`).
+- **Port Scanning:** Naabu invoked via `-host` CSV; any non-zero exit → note + fallback (empty set, same JSON shape, exit 0). Defaults: audit `rate 20, threads 10` top-100, ctf `rate 1000, threads 100` top-1000. Audit `10-50`/`5-20` free, above needs `--override` (logged). Ctf `100-5000`/`10-200` hard-reject; `--override` ignored+note. Masscan ctf-only via `--scanner masscan` (`-oL -`, dedicated parser), falls back to naabu with note. Comma-joined targets share one argv slot — scope gate remains the control.
+- **HTTP Probing & Tech Stacks:** Httpx receives targets via stdin (not positionals); any non-zero exit → note + fallback. Tech detect + TLS probe. No separate Wappalyzer step.
+- **Content Discovery:** Ffuf (raft wordlists) ctf-only; audit hard-off (dirs=[]). Feroxbuster ctf-only via `--fuzzer ferox` (binary probed as `feroxbuster`, not `ferox`). Parser hardened against progress prefixes, bracket art, config echoes — finding-anchored on `[Status:` tokens.
+- **Runtime Behavior:**
+  - Fallback architecture: every missing/failed tool emits `note:` to stderr, same JSON shape, exit 0 — no run aborts.
+  - Provenance honesty: `source_tool` lists only tools that actually ran (subset of `nmap+httpx+ffuf`/`ferox`, or `none`).
+  - IP rule: `ip` is empty string for hostnames, literal for IPs — never copies hostname (Dev5 join depends on this).
+  - Pipes: naabu `-host` CSV, httpx stdin, ffuf/ferox stdout parsed.
+  - Scope gate: audit fail-closed pre-packet; ctf warn-continue except IPv6/CIDR which exit 2.
+  - Invariants: `http=null ⇒ dirs=[]`; `dirs=[]` in all audit records.
 
 ### Developer 4: JS & API Analysis Engine
 
@@ -150,11 +157,11 @@ dev2/ (passive, Docker)
 
 ```text
 dev3/ (active, Docker; see dev3 branch README for full tree)
-  dev3.py                # CLI 4 flags + --rate --threads --override --scanner --fuzzer; naabu->nmap -sV -sC->httpx->[ffuf ctf-only]
-  scope.py               # COPY; audit stop before any packet, ctf lenient warn-continue; CIDR/IPv6 exit 2 in both modes
-  parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}; ip empty for hostnames; source_tool reflects what ran
+  dev3.py                # CLI 4 flags + --rate --threads --override --scanner --fuzzer; naabu(-host)→nmap(-sV -sC)→httpx(stdin)→[ffuf/ferox ctf-only]
+  scope.py               # COPY; audit stop before any packet, ctf warn-continue; CIDR/IPv6 exit 2 in both modes
+  parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}; ip="" for hostnames; source_tool honest
   wordlists/raft-small.txt  # placeholder + source URL comment (no large commit)
-  Dockerfile             # nmap+ffuf via apt; naabu/httpx manual installs (Go), masscan/ferox absent-by-design with fallback+note
+  Dockerfile             # kali-rolling base; apt: nmap+ffuf; naabu/httpx manual; masscan/ferox absent-by-design with fallback+note
 ```
 
 ```text

@@ -1,7 +1,10 @@
-# Dev3 local ignores (branch-level).
+# Real scope and keys stay local; only *.example.* is tracked.
+scope.txt
+keys.env
+# Runtime outputs
 out/
-*.json
-!schemas/*.json
+report/
+logs/
+# Python
 __pycache__/
 .venv/
-keys.env

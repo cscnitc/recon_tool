@@ -77,14 +77,34 @@ def is_in_scope(target, scope_entries):
     return False
 
 
+def _is_ipv6(s):
+    try:
+        return isinstance(ipaddress.ip_address(s.strip()), ipaddress.IPv6Address)
+    except ValueError:
+        return False
+
+
 def check_targets(targets, scope_file, mode):
     """Audit: raise SystemExit on first out-of-scope target (before any packet).
-    Ctf: warn-and-continue (lenient for lab IPs), flag still required for shape.
+    Ctf: warn-and-continue for IPv4/hostname out-of-scope (lenient for lab IPs),
+    flag still required for shape. CIDR targets always exit 2 (Dev1 must expand).
+    IPv6 always dropped (out for v1): audit exits 2, ctf drops with a note.
     Returns (in_scope_targets, notes)."""
     entries = _load_scope(scope_file)
     notes = []
     kept = []
     for t in targets:
+        ts = t.strip()
+        if "/" in ts:
+            print(f"error: CIDR target not expanded in dev3, Dev1 must expand before us: {t}",
+                  file=sys.stderr)
+            raise SystemExit(2)
+        if _is_ipv6(ts):
+            if mode == "audit":
+                print(f"error: IPv6 out for v1 in audit mode: {t}", file=sys.stderr)
+                raise SystemExit(2)
+            notes.append(f"IPv6 out for v1, dropped target: {t}")
+            continue
         if is_in_scope(t, entries):
             kept.append(t)
         else:

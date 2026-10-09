@@ -21,6 +21,26 @@ def parse_naabu_ports(text):
     return out
 
 
+def parse_masscan_oL(text):
+    """Parse masscan -oL - output (e.g. 'open tcp 80 10.10.5.12') -> set of (host, port).
+
+    Dedicated parser: never reuse parse_naabu_ports() for masscan (shape differs:
+    naabu is host:port, masscan -oL is 'open <proto> <port> <ip>'). Best-effort,
+    never throws; skips comments and unparseable lines."""
+    out = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^open\s+(tcp|udp)\s+(\d+)\s+(\S+)", line)
+        if m:
+            try:
+                out.add((m.group(3), int(m.group(2))))
+            except (ValueError, TypeError):
+                continue
+    return out
+
+
 def parse_nmap_records(text, default_host=""):
     """Parse minimal nmap -oN lines like 'PORT STATE SERVICE VERSION'.
     Returns list of dicts with port/service/banner. Best-effort, never throws."""
@@ -67,14 +87,46 @@ def parse_httpx_jsonl(text):
 
 
 def parse_ffuf_paths(text):
-    """Parse ffuf stdout paths (/admin, /api/...) -> list of unique dirs."""
+    """Parse ffuf stdout paths (/admin, /api/...) -> list of unique dirs.
+
+    Slash-tolerant: accepts 'admin' and '/admin', emits normalized '/admin'.
+    A leading bare word (ffuf finding line when the wordlist lacks leading
+    slashes) counts only with finding evidence ('[Status' marker or '/' in
+    the token); pure status codes and metadata lines fall through to the
+    /path search or are skipped. Best-effort, never throws."""
     dirs = []
     seen = set()
     for line in text.splitlines():
-        m = re.search(r"(/\S*)", line)
-        if not m:
+        s = line.strip()
+        if not s:
             continue
-        path = m.group(1).rstrip(",")
+        first = s.split()[0].rstrip(",").rstrip(":")
+        path = None
+        if first.startswith("/"):
+            path = first
+        elif (re.match(r"^[A-Za-z0-9._~\-]+(/[A-Za-z0-9._~\-]*)*$", first)
+                and not first.isdigit()
+                and ("/" in first or "[Status" in s)):
+            path = "/" + first.lstrip("/")
+        else:
+            m = re.search(r"(/\S*)", s)
+            if not m:
+                continue
+            raw = m.group(1).rstrip(",").rstrip(":")
+            if "[" in raw or "]" in raw:
+                continue  # bracket fractions like [1/2], not paths
+            if raw.startswith("//"):
+                # URL form (ferox 'http://host/path'): drop authority, keep path
+                segs = raw.split("/")
+                rest = [g for g in segs[3:] if g]
+                if not rest:
+                    continue
+                path = "/" + "/".join(rest)
+            else:
+                path = raw
+        path = "/" + path.lstrip("/")
+        if path == "/":
+            continue
         if path not in seen:
             seen.add(path)
             dirs.append(path)

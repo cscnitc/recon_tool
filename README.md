@@ -151,10 +151,10 @@ dev2/ (passive, Docker)
 ```text
 dev3/ (active, Docker; see dev3 branch README for full tree)
   dev3.py                # CLI 4 flags + --rate --threads --override --scanner --fuzzer; naabu->nmap -sV -sC->httpx->[ffuf ctf-only]
-  scope.py               # COPY; audit stop before any packet, ctf lenient warn-continue
-  parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}
+  scope.py               # COPY; audit stop before any packet, ctf lenient warn-continue; CIDR/IPv6 exit 2 in both modes
+  parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}; ip empty for hostnames; source_tool reflects what ran
   wordlists/raft-small.txt  # placeholder + source URL comment (no large commit)
-  Dockerfile             # naabu+nmap+httpx+ffuf; masscan/ferox detected, fallback+note if missing
+  Dockerfile             # nmap+ffuf via apt; naabu/httpx manual installs (Go), masscan/ferox absent-by-design with fallback+note
 ```
 
 ```text

@@ -67,16 +67,23 @@ def parse_httpx_jsonl(text):
             obj = json.loads(line)
         except ValueError:
             continue
+        if not isinstance(obj, dict):
+            continue  # well-formed JSON of the wrong type (array/null/str/num)
         host = obj.get("host") or obj.get("url") or ""
         port = obj.get("port")
         try:
             port = int(port) if port is not None else None
         except (ValueError, TypeError):
             port = None
+        tech = obj.get("tech") or obj.get("technologies") or []
+        if isinstance(tech, str):
+            tech = [tech]
+        elif not isinstance(tech, list):
+            tech = []  # never let a non-list reach the tls merge
         http = {
             "status": obj.get("status_code", obj.get("status")),
             "title": obj.get("title", ""),
-            "tech": obj.get("tech") or obj.get("technologies") or [],
+            "tech": tech,
         }
         # TLS probe merges into tech when present.
         tls = obj.get("tls")

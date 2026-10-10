@@ -74,11 +74,11 @@ Docker build for club laptops:
 
 ```bash
 docker build -t csc-recon:dev3 .
-docker run --rm -v $(pwd)/out:/out csc-recon:dev3 \
+docker run --rm --cap-add=NET_RAW --user "$(id -u):$(id -g)" -v "$(pwd)/out:/out" csc-recon:dev3 \
   --in /out/subdomains.txt --mode audit --scope /out/scope.txt --out /out/dev3.json
 ```
 
-naabu needs privileges for SYN scan. Without root it falls back to connect scan, which is slower but fine for small scopes.
+naabu SYN scan needs runtime --cap-add=NET_RAW; without that capability naabu falls back to connect scan, which is slower but fine for small scopes. The image runs as nonroot user dev3 by default; use --user "$(id -u):$(id -g)" for bind-mounted output ownership.
 
 **Path handling:** `--in`, `--scope`, and `--out` reject any path containing `..` traversal components (raw or normalized). Absolute paths and symlinks are permitted as operator-controlled CLI inputs.
 

@@ -251,6 +251,7 @@ def run(targets, mode, scope_file, out, rate=None, threads=None, override=None,
     fuzz_map = fuzz_dirs(live, mode, fuzzer, threads, notes) if mode == "ctf" else {}
 
     records = []
+    dropped = 0
     have_nmap = shutil.which("nmap") is not None
     have_httpx = shutil.which("httpx") is not None
     for r in finger:
@@ -262,9 +263,15 @@ def run(targets, mode, scope_file, out, rate=None, threads=None, override=None,
         # source_tool reflects what actually ran (honest provenance, no skipped: token).
         tools = (["nmap"] if have_nmap else []) + (["httpx"] if have_httpx else [])
         tools += (["ferox" if fuzzer == "ferox" else "ffuf"] if key in fuzz_map else [])
-        records.append(build_record(r["host"], as_ip(r["host"]) or "", r["port"],
-                                    r["service"], r.get("banner", ""), http, dirs,
-                                    source_tool="+".join(tools) or "none"))
+        rec = build_record(r["host"], as_ip(r["host"]) or "", r["port"],
+                           r["service"], r.get("banner", ""), http, dirs,
+                           source_tool="+".join(tools) or "none")
+        if rec is None:
+            dropped += 1
+            continue
+        records.append(rec)
+    if dropped:
+        notes.append(f"dropped {dropped} invalid records")
     payload = records
     with open(out, "w") as f:
         json.dump(payload, f, indent=2)

@@ -156,18 +156,39 @@ def parse_ffuf_paths(text):
 
 
 def build_record(host, ip, port, service, banner="", http=None, dirs=None, source_tool="nmap+httpx"):
-    """Enforce contracts: http null forces dirs == []."""
-    if http is None:
-        dirs = []
-    else:
-        dirs = list(dirs or [])
-    return {
-        "host": host,
-        "ip": ip,
-        "port": int(port),
-        "service": service,
-        "banner": banner or "",
-        "http": http,
-        "dirs": dirs,
-        "source_tool": source_tool,
-    }
+    """Enforce contracts: http null forces dirs == []. Returns None for invalid records; never throws."""
+    try:
+        if not isinstance(host, str) or not host:
+            return None
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            return None
+        if not 1 <= port <= 65535:
+            return None
+        if not isinstance(service, str):
+            service = ""
+        if not isinstance(banner, str):
+            banner = ""
+        else:
+            banner = banner or ""
+        if http is not None and not isinstance(http, dict):
+            http = None
+        if http is None:
+            dirs = []
+        else:
+            dirs = list(dirs or [])
+        if not isinstance(source_tool, str):
+            source_tool = "none"
+        return {
+            "host": host,
+            "ip": ip,
+            "port": port,
+            "service": service,
+            "banner": banner,
+            "http": http,
+            "dirs": dirs,
+            "source_tool": source_tool,
+        }
+    except Exception:
+        return None

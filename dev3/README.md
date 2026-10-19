@@ -45,7 +45,16 @@ In audit mode the script stays quiet. Defaults are `rate 20, threads 10` with to
 
 ## Scope check
 
-`--scope` points to a file with one allowed host, domain, or CIDR per line. Targets are arbitrary, examples are placeholders. A subdomain of a listed domain counts as in scope. For CIDR entries, network and broadcast addresses are skipped. IPv6 is out for v1. In audit mode the script reads it first and compares every target. A target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs. CIDR-as-target exits 2 in both modes; IPv6 is dropped even in ctf.
+`--scope` points to a file with one allowed host, domain, or CIDR per line (IPv4 only in v1). Targets are arbitrary, examples are placeholders. Lines are trimmed, blank lines are skipped, and `#` starts a comment — on its own line or after an entry.
+
+```text
+# scope.txt (local only; never commit the real one)
+portal.college.edu
+203.0.113.10
+10.10.5.0/24          # range; network and broadcast addresses are skipped
+```
+
+A subdomain of a listed domain counts as in scope (`portal.college.edu` matches `college.edu`). Do not list bare public suffixes (`edu`, `com`): a listed suffix matches everything beneath it. Entries that cannot be used — malformed CIDR, IPv6 address/CIDR, scheme URLs, stray whitespace — are skipped with a `note:` line and never widen the allowlist. In audit mode the script reads the file first and compares every target; a target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs. CIDR-as-target exits 2 in both modes; IPv6 targets are dropped even in ctf.
 
 ## Layout (as-built, adopted from main's recommended set)
 

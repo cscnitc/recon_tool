@@ -1,19 +1,50 @@
 """Scope check for dev3. Mirror of main contracts.md scope rule.
 Canonical source: main contracts.md. This copy lets dev3 run standalone.
+Extension: '#' comments may be inline, and unusable entries are skipped
+with a note instead of failing silently.
 """
 import ipaddress
 import sys
 
 
 def _load_scope(scope_file):
+    """Parse one host/domain/IPv4-CIDR per line; '#' starts a comment (inline ok).
+
+    Unusable entries (bad CIDR, IPv6, scheme URLs, stray whitespace) are
+    skipped and reported as notes; they can never widen the allowlist.
+    Returns (entries, notes).
+    """
     entries = []
+    notes = []
     with open(scope_file) as f:
         for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
+            line = line.split("#", 1)[0].strip()
+            if not line:
                 continue
+            if "://" in line:
+                notes.append(f"invalid scope entry ignored (scheme not allowed): {line}")
+                continue
+            if "/" in line:
+                try:
+                    net = ipaddress.ip_network(line, strict=False)
+                except ValueError:
+                    notes.append(f"invalid scope entry ignored (bad CIDR): {line}")
+                    continue
+                if isinstance(net, ipaddress.IPv6Network):
+                    notes.append(f"IPv6 scope entry ignored (out for v1): {line}")
+                    continue
+            elif any(c.isspace() for c in line):
+                notes.append(f"invalid scope entry ignored (whitespace): {line}")
+                continue
+            else:
+                try:
+                    if isinstance(ipaddress.ip_address(line), ipaddress.IPv6Address):
+                        notes.append(f"IPv6 scope entry ignored (out for v1): {line}")
+                        continue
+                except ValueError:
+                    pass
             entries.append(line)
-    return entries
+    return entries, notes
 
 
 def _is_ip(s):
@@ -90,8 +121,8 @@ def check_targets(targets, scope_file, mode):
     flag still required for shape. CIDR targets always exit 2 (Dev1 must expand).
     IPv6 always dropped (out for v1): audit exits 2, ctf drops with a note.
     Returns (in_scope_targets, notes)."""
-    entries = _load_scope(scope_file)
-    notes = []
+    entries, parse_notes = _load_scope(scope_file)
+    notes = list(parse_notes)
     kept = []
     for t in targets:
         ts = t.strip()

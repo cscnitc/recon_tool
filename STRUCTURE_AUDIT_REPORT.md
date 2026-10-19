@@ -275,4 +275,24 @@ A second validator run (`opencode/mimo-v2.6-flash-free`, 12 pinned commands, **R
 
 ## 9. Verdict
 
-The lead's structural criticism was **justified** — as a project/skeleton gap, not a dev3-module-quality gap: dev3's module was the only contract-conforming code in the repo, but it could not serve as the fork base without the hub files, slots, and pipeline attach structure. This branch now carries that structure, with each fix and claim backed by a re-runnable receipt above. Changes are staged/uncommitted for review; nothing was pushed and no sibling branch was touched.
+The lead's structural criticism was **justified** — as a project/skeleton gap, not a dev3-module-quality gap: dev3's module was the only contract-conforming code in the repo, but it could not serve as the fork base without the hub files, slots, and pipeline attach structure. This branch now carries that structure, with each fix and claim backed by a re-runnable receipt above. The restructure was committed as `2452b06` and pushed to `origin/dev3` after review; no sibling branch was touched. A follow-up scope-parser hardening is documented in §10.
+
+---
+
+## 10. Addendum — scope-file hardening (follow-up, after `2452b06`)
+
+Approved follow-up after the audit. Only `dev3/scope.py` parsing changed (plus docs); the scope **rule** — allowed entry forms, matching semantics, exit codes — is unchanged.
+
+- **Inline comments:** `#` now starts a comment anywhere on a line (`10.10.5.0/24  # office` works). Previously only full-line comments were skipped, so a trailing comment silently neutralized a CIDR entry and turned a hostname entry into a never-matching string.
+- **Unusable entries are reported, not silent:** malformed CIDR, IPv6 address/CIDR, scheme URLs, and stray whitespace are skipped and emitted as `note:` lines. Skipped entries never match, so a typo cannot widen the allowlist (audit stays fail-closed).
+- **One behavior change to review:** a scope file that used inline comments previously had those lines ignored; they are now enforced. Real scope files should get one review pass after upgrading.
+- **Canonical text:** `scope.py` mirrors the `main:contracts.md` rule; propose the same wording upstream before dev2/dev4 copies adopt it (hub files here stay byte-synced with `main@eadf234`).
+
+Receipts (own re-runs, offline, zero packets):
+
+| Check | Result |
+|---|---|
+| `py_compile` dev3/{dev3,parsers,scope}.py | exit 0 |
+| 10 check groups: inline comments, comments/blanks, bad CIDR, IPv6 ×2, scheme URL, whitespace, hostname exact/subdomain/suffix-boundary, IP + CIDR network/broadcast boundaries, note propagation, audit exit-2, ctf lenient | ALL PASSED |
+| pre/post CLI proof — `scope-inline.txt` (`127.0.0.1  # fixture` + `10.0.0.0/33`), audit mode | OLD code: exit 2 (inline-commented entry invisible) → NEW code: exit 0, `note: invalid scope entry ignored (bad CIDR): 10.0.0.0/33` |
+| ctf stub chain + audit fallback smoke (valid scope) | exit 0, record shape unchanged, `dirs` populated |

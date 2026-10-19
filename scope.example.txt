@@ -1,0 +1,4 @@
+# Example scope file. Copy to scope.txt and edit locally. Never commit the real one.
+portal.college.edu
+app.college.edu
+10.10.5.0/24

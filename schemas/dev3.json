@@ -1,0 +1,26 @@
+[
+  {
+    "host": "portal.college.edu",
+    "ip": "10.10.5.12",
+    "port": 443,
+    "service": "https",
+    "banner": "nginx 1.18",
+    "http": {
+      "status": 200,
+      "title": "Student Portal",
+      "tech": ["nginx", "php"]
+    },
+    "dirs": ["/admin", "/api/v1/login"],
+    "source_tool": "nmap+httpx+ffuf"
+  },
+  {
+    "host": "app.college.edu",
+    "ip": "10.10.5.13",
+    "port": 22,
+    "service": "ssh",
+    "banner": "OpenSSH 8.9",
+    "http": null,
+    "dirs": [],
+    "source_tool": "nmap"
+  }
+]

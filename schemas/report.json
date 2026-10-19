@@ -1,0 +1,15 @@
+[
+  {
+    "host": "portal.college.edu",
+    "ips": ["10.10.5.12"],
+    "ports": [
+      {
+        "port": 443,
+        "service": "https"
+      }
+    ],
+    "tech": ["nginx", "php"],
+    "urls": ["/api/v1/login"],
+    "notes": ["ffuf skipped in audit mode"]
+  }
+]

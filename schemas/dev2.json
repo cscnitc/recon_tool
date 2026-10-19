@@ -1,0 +1,12 @@
+[
+  {
+    "host": "portal.college.edu",
+    "ips": ["10.10.5.12"],
+    "source_tool": "subfinder+crt.sh"
+  },
+  {
+    "host": "app.college.edu",
+    "ips": ["10.10.5.13"],
+    "source_tool": "subfinder+chaos"
+  }
+]

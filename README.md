@@ -1,87 +1,197 @@
-# Dev3: active scanning and probing
+# Automated Recon Platform
 
-This branch probes live hosts. It takes the subdomain list from Dev2 and returns open ports, service names, web titles, tech fingerprints, and found paths. It is the only branch that sends packets to ports or requests paths that may not exist.
+> **Engineering Execution Plan - 5-Developer Team**
 
-Stack for this branch: Python, naabu to find ports, nmap to fingerprint services, httpx to probe HTTP, ffuf to fuzz paths, all packed in Docker so it runs the same on any Linux laptop.
+A fast, structured reconnaissance orchestrator designed to parallelize asset mapping and deliver a single actionable report:
 
-## Input and output
+**Domains -> Subdomains -> IPs -> Ports -> Services -> Technologies -> URLs -> APIs -> JS Endpoints -> Paths**
 
-Input is a text file with one host per line. It usually comes from Dev2.
+## Aims
 
-```
-app.college.edu
-portal.college.edu
-10.10.5.12
-```
+v1 exists for two uses: fast recon in CTF labs, and quiet checkups on college infra in scope. Same tools, different loudness, picked by `--mode`.
 
-Output is `dev3.json`, one record per port. Dev5 reads this file directly.
+Success means one command per module with the same flags, three json files that join on host without manual cleanup, and a report the team or IT can read without asking what a column means.
 
-```json
-{
-  "host": "portal.college.edu",
-  "ip": "10.10.5.12",
-  "port": 443,
-  "service": "https",
-  "banner": "nginx 1.18",
-  "http": {
-    "status": 200,
-    "title": "Student Portal",
-    "tech": ["nginx", "php"]
-  },
-  "dirs": ["/admin", "/api/v1/login"],
-  "source_tool": "nmap+httpx+ffuf"
-}
-```
+Out of scope for v1: exploitation, credential testing, paid services, hosted servers, and scans outside `scope.txt` in audit mode. Those stay out even if a tool offers them. v2 (queue, database, dashboard) starts only after v1 has run one CTF and one college checkup off these files.
 
-If httpx finds no HTTP on a port, the `http` block is null and `dirs` stays empty. `ip` is an empty string for hostnames. `source_tool` lists only tools that actually ran (can be `none`).
+Targets are arbitrary. Examples use college names as placeholders. Any domain, IP, or CIDR works. The scope file decides what is allowed, not the format of the name.
 
-## Modes
+## Operational Modes
 
-The `--mode` flag picks defaults, while `--rate` and `--threads` let the person running it adjust within bounds. Omit them to take mode defaults.
+### Mode 1: THM / HTB / CTF
 
-In ctf mode the script runs the full chain: naabu for all common ports, nmap `-sV -sC` on what naabu found, httpx with tech detect and TLS probe, then ffuf with the raft wordlists. Defaults are `rate 1000, threads 100`, adjustable `100-5000` and `10-200`. Masscan (`--scanner masscan`) and feroxbuster (`--fuzzer ferox`) are ctf-only opt-ins when the binary exists, same output shape. Use this on THM, HTB, and other lab targets. ctf with `--override` is ignored with a note; empty discovery exits 0 with a note.
+- Aggressive active scanning with high defaults for fast turnaround
+- Naabu to Nmap service scan (`-sV -sC`), defaults per mode, overridable within bounds and logged
+- ffuf only in ctf mode, off in audit mode
+- Deep JS asset extraction and live endpoint analysis
 
-In audit mode the script stays quiet. Defaults are `rate 20, threads 10` with top 100 ports and `nmap -T2`, httpx checks status, title, and TLS only. Adjustable `rate 10-50` and `threads 5-20` freely. Above that needs `--override reason-text`, which is written to the log and report notes. ffuf does not run. This is the setting for college infra.
+### Mode 2: Real Web Scan
 
-## Scope check
+- Quiet scanning posture with low defaults
+- Passive OSINT and free public sources first
+- Zero directory brute-forcing
+- Free sources only (crt.sh, chaos free, Shodan or Censys only if the user plugs in their own free key, otherwise fallback to crt.sh)
+- HTTP and TLS health check only
 
-`--scope` points to a file with one allowed host, domain, or CIDR per line. Targets are arbitrary, examples are placeholders. A subdomain of a listed domain counts as in scope. For CIDR entries, network and broadcast addresses are skipped. IPv6 is out for v1. In audit mode the script reads it first and compares every target. A target outside scope stops the run before any packet is sent. ctf mode still takes the flag so the call shape stays the same, but the check is lenient for lab IPs. CIDR-as-target exits 2 in both modes; IPv6 is dropped even in ctf.
+## Work Allocation Matrix
 
-## Layout (v1 build, recommended set)
+| Developer | Primary Domain | Core Tools & Tech | Key Deliverables |
+|---|---|---|---|
+| **Dev 1 (Lead)** | Architecture, State & Concurrency | Python stdlib-only (no Docker image, no Redis) | Runner with shared flags, scope check, mode enforcement, log per run |
+| **Dev 2** | Passive Discovery & OSINT | Python, Subfinder, Chaos free, Crt.sh, Dnsx (BYO-key optional, amass only on --extended) | Subdomain find, resolve, and dedupe to dev2.json with the same 4 flags |
+| **Dev 3** | Active Scanning & Probing | Nmap, Ffuf (apt); Naabu, Httpx manual install; masscan/ferox ctf opt-in | Naabu (-host CSV) → Nmap (-sV -sC) → Httpx (stdin) → ffuf/ferox ctf-only |
+| **Dev 4** | JS & API Analysis | Python, Gau, Waybackurls, Katana, LinkFinder, SecretFinder | Archive plus crawl to dev4.json with the same 4 flags, shallow only in audit |
+| **Dev 5** | Data Pipeline & Reporting | Python, JSON/Markdown flat files (v1; SQLite/Postgres deferred to v2) | Schema check, merge to report.json/md, run metadata (DB and HTML dashboard in v2) |
+
+## Core Platform Architecture
+
+The platform follows this execution flow:
 
 ```text
-dev3/
-  dev3.py                # CLI --in/--mode/--scope/--out/--rate/--threads/--override/--scanner/--fuzzer; naabu->nmap -sV -sC->httpx->[ffuf ctf-only]
-  scope.py               # COPY of main scope rule; audit stop before any packet, ctf lenient warn-continue
-  parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}
+Target IP/Domain
+      |
+      v
+[ Dev 1 Engine ]
+      |
+      v
+[ Dev 2 Passive + Dev 3 Active + Dev 4 JS Analysis ]
+      |
+      v
+[ Dev 5 Aggregator ]
+      |
+      v
+Attack Surface Map
+```
+
+## Sprint Breakdown & Task Delegation
+
+### Developer 1: Core Engine & Orchestration
+
+**Primary domain:** Core Platform & Architecture
+
+v1 is a lite Python runner (see `dev1` branch). No Redis, no database. The full queue can replace it later without changing module flags.
+- **Architecture & Pipeline:** Call dev2, then dev3, then dev4 with the same four flags (`--in --mode --scope --out`).
+- **Mode Controller:** Enforce strict runtime execution based on operational mode:
+  - **CTF Mode:** High threads, active port sweeps, and directory fuzzing enabled.
+  - **Audit Mode:** Low rate (`nmap -T2`, top 100 ports), fuzzing off, `scope.txt` required. Anything outside scope stops the run.
+- **Module Lifecycle:** Each module exposes `run(targets, mode, scope_file, out)` (see `contracts.md` Function shape) and writes JSON. The runner logs user, time, mode, and exit code per module.
+
+### Developer 2: Passive Reconnaissance Engine
+
+**Primary domain:** OSINT & Passive Discovery
+
+Stack is Python with subfinder, chaos free, crt.sh and certspotter, plus dnsx for resolving, all in Docker. Same four flags as every module. Output is `dev2.json` with required `host` and `ips` (see `schemas/`).
+- **Subdomain Enumeration:** Run subfinder and chaos, pull crt.sh and certspotter for SANs, resolve with dnsx, then dedupe. Amass runs only when `--extended` is passed, since it is slow and mostly duplicates subfinder for v1.
+- **Rate and Keys:** Passive sources need no rate flags. API keys are BYO and optional: each member creates their own free account and fills their own `keys.env` (see `keys.example.env`). With no key the module falls back to crt.sh only and logs `enrichment skipped, no key` in notes. Required keys never change either way.
+- **Audit Limits:** Passive only in audit mode. No DNS brute force. Every target is checked against scope before any lookup batch starts.
+
+### Developer 3: Active Scanning & Probing Engine
+
+**Primary domain:** Active Recon & Content Discovery
+
+Stack is Python with nmap, ffuf (apt in kali-rolling); naabu, httpx (manual Go installs, fallback+note if missing); masscan, feroxbuster (ctf opt-ins). Same four flags plus `--rate`, `--threads`, `--override`, `--scanner`, `--fuzzer`. Output is `dev3.json`, one record per port (see `schemas/`).
+- **Port Scanning:** Naabu invoked via `-host` CSV; any non-zero exit → note + fallback (empty set, same JSON shape, exit 0). Defaults: audit `rate 20, threads 10` top-100, ctf `rate 1000, threads 100` top-1000. Audit `10-50`/`5-20` free, above needs `--override` (logged). Ctf `100-5000`/`10-200` hard-reject; `--override` ignored+note. Masscan ctf-only via `--scanner masscan` (`-oL -`, dedicated parser), falls back to naabu with note. Comma-joined targets share one argv slot — scope gate remains the control.
+- **HTTP Probing & Tech Stacks:** Httpx receives targets via stdin (not positionals); any non-zero exit → note + fallback. Tech detect + TLS probe. No separate Wappalyzer step.
+- **Content Discovery:** Ffuf (raft wordlists) ctf-only; audit hard-off (dirs=[]). Feroxbuster ctf-only via `--fuzzer ferox` (binary probed as `feroxbuster`, not `ferox`). Parser hardened against progress prefixes, bracket art, config echoes — finding-anchored on `[Status:` tokens.
+- **Runtime Behavior:**
+  - Fallback architecture: every missing/failed tool emits `note:` to stderr, same JSON shape, exit 0 — no run aborts.
+  - Provenance honesty: `source_tool` lists only tools that actually ran (subset of `nmap+httpx+ffuf`/`ferox`, or `none`).
+  - IP rule: `ip` is empty string for hostnames, literal for IPs — never copies hostname (Dev5 join depends on this).
+  - Pipes: naabu `-host` CSV, httpx stdin, ffuf/ferox stdout parsed.
+  - Scope gate: audit fail-closed pre-packet; ctf warn-continue except IPv6/CIDR which exit 2.
+  - Invariants: `http=null ⇒ dirs=[]`; `dirs=[]` in all audit records.
+
+### Developer 4: JS & API Analysis Engine
+
+**Primary domain:** Endpoint & Parameter Extraction
+
+Stack is Python with gau, waybackurls, katana, LinkFinder, and SecretFinder in Docker. Same four flags as every module. Input is the dev2 list plus dev3 live hosts. Output is `dev4.json` with required `host` and `urls` (see `schemas/`).
+- **Historical & Crawled URLs:** Pull gau and waybackurls first, then crawl with katana. Audit mode uses archives plus katana depth 2 at most. Ctf mode may crawl deeper.
+- **JS Static Analysis:** Extract JavaScript files and pass them through LinkFinder to find hidden API paths. JSFinder is dropped as overlap. Params are collected by the parser, not a separate tool.
+- **Secret Identification:** Run SecretFinder regex and store matches as hints for the team. Hints stay in `dev4.json` and `report.json` but are redacted from the IT-facing `report.md`.
+
+### Developer 5: Data Pipeline, Aggregation & Reporting
+
+**Primary domain:** Data Normalization & Dashboards
+
+v1 is a lite Python merge (see `dev5` branch). No Postgres, no hosted dashboard. Those move to v2 and will read the same `report.json`.
+- **Data Aggregation Engine:** Read `dev2.json`, `dev3.json`, and `dev4.json` from one folder and join on host or IP.
+- **Data Validation & Schema:** Check required keys and types. Skip bad records with file and line noted, allow extra keys.
+- **Reporting Suite:** Write `report.json`, `report.md`, and `run-meta.json`. The markdown fits a CTF writeup or a short note to IT.
+
+## Module outputs
+
+`dev*.json` means the three files Dev 5 merges: `dev2.json` holds subdomains and IPs, `dev3.json` holds ports, services, and HTTP results, `dev4.json` holds URLs and JS endpoints. Phase 2 starts when all three exist and pass key checks.
+
+## File structures (v1 build, recommended set)
+
+`main` is the authority for these trees. `dev1/dev2/dev4/dev5` branches are not edited here; they adopt these trees on next pull. `scope.py` is a copy per `dev1-4` for standalone runs (dedupe deferred to v2). `parsers.py` is never shared. `Dockerfile` exists only for `dev2/dev3/dev4`. No `tests/`, no `docs/`, no `runners/`, no `requirements.txt` (stdlib-only), no SQLite in v1.
+
+```text
+/ (main)
+  README.md              # this overview + all trees below
+  contracts.md           # flags, rates, scope, keys, function shape, required keys, logging
+  keys.example.env       # SHODAN/CHAOS/CENSYS placeholders (real keys.env gitignored)
+  scope.example.txt      # example scope (real scope.txt gitignored)
+  schemas/               # dev2.json dev3.json dev4.json report.json run-meta.json examples
+  .gitignore             # keys.env scope.txt out/ report/ logs/ __pycache__/ .venv/
+```
+
+```text
+dev1/ (lite runner, stdlib-only, no Docker image)
+  runner.py              # subprocess dev2->dev3->dev4, same flags, mode/rate/override gate, exit-code log
+  scope.py               # COPY of main scope rule; audit fail-closed before any module
+  contracts.md           # frozen copy for standalone branch use
+  schemas/               # dev2.json dev3.json dev4.json copies for local testing
+  logs/.gitkeep          # per-run run-<ISO>.log (user,time,mode,rate/threads,override,scope-sha,exits)
+```
+
+```text
+dev2/ (passive, Docker)
+  dev2.py                # CLI --in --mode --scope --out [--extended]; subfinder->chaos->crt.sh->certspotter->dedupe->dnsx->[amass if --extended+ctf]
+  scope.py               # COPY; audit check before any lookup batch
+  parsers.py             # normalize all sources -> {host,ips,source_tool}; SAN parse + dedupe
+  Dockerfile             # subfinder+chaos+dnsx+amass; crt.sh/certspotter via python/curl
+  keys.example.env       # copy; real keys.env gitignored, fallback crt.sh-only + note
+```
+
+```text
+dev3/ (active, Docker; see dev3 branch README for full tree)
+  dev3.py                # CLI 4 flags + --rate --threads --override --scanner --fuzzer; naabu(-host)→nmap(-sV -sC)→httpx(stdin)→[ffuf/ferox ctf-only]
+  scope.py               # COPY; audit stop before any packet, ctf warn-continue; CIDR/IPv6 exit 2 in both modes
+  parsers.py             # naabu/nmap/httpx/ffuf -> {host,ip,port,service,banner,http|NULL,dirs,source_tool}; ip="" for hostnames; source_tool honest
   wordlists/raft-small.txt  # placeholder + source URL comment (no large commit)
-  Dockerfile             # nmap+ffuf via apt; naabu/httpx manual installs (Go), masscan/ferox absent-by-design with fallback+note
-  .gitignore             # scope.txt keys.env out/ report/ logs/ __pycache__/ .venv/
+  Dockerfile             # kali-rolling base; apt: nmap+ffuf; naabu/httpx manual; masscan/ferox absent-by-design with fallback+note
 ```
 
-No `tests/`, no `requirements.txt` (stdlib-only), no `runners/` split in v1 lite.
-
-`dev3.py` handles flags and calls each step. `scope.py` holds the scope check. `parsers.py` converts nmap, naabu, httpx, and ffuf output into the JSON above. `ffuf` stays off in audit mode (`dirs==[]`, `http==null` when no HTTP).
-
-## How to run
-
-```bash
-python dev3.py --in subdomains.txt --mode ctf --scope scope.txt --out dev3.json
-python dev3.py --in subdomains.txt --mode audit --scope scope.txt --out dev3.json
+```text
+dev4/ (JS/API, Docker)
+  dev4.py                # CLI 4 flags; gau+waybackurls->katana(depth<=2 audit)->LinkFinder->SecretFinder
+  scope.py               # COPY; same audit gate
+  parsers.py             # -> {host,urls,js_endpoints,params[str],secrets_hint[str],source_tool}
+  Dockerfile             # gau+waybackurls+katana+LinkFinder+SecretFinder
 ```
 
-Docker build for club laptops:
-
-```bash
-docker build -t csc-recon:dev3 .
-docker run --rm --cap-add=NET_RAW --user "$(id -u):$(id -g)" -v "$(pwd)/out:/out" csc-recon:dev3 \
-  --in /out/subdomains.txt --mode audit --scope /out/scope.txt --out /out/dev3.json
+```text
+dev5/ (merge, stdlib-only, no Docker image, flat files only)
+  merge.py               # --in ./out --out ./report; join dev2/3/4 on host|ip-fallback; write report.json/md + run-meta.json
+  validate.py            # required-keys+types check; skip bad w/ file:line, allow extra keys; redact secrets from .md
+  schemas/               # dev2.json dev3.json dev4.json copies for local validation
 ```
 
-naabu SYN scan needs runtime --cap-add=NET_RAW; without that capability naabu falls back to connect scan, which is slower but fine for small scopes. The image runs as nonroot user dev3 by default; use --user "$(id -u):$(id -g)" for bind-mounted output ownership.
+## Branches
 
-**Path handling:** `--in`, `--scope`, and `--out` reject any path containing `..` traversal components (raw or normalized). Absolute paths and symlinks are permitted as operator-controlled CLI inputs.
+- main holds this overview.
+- dev1 holds the lite runner and shared flags.
+- dev3 holds the active scanner (naabu, nmap, httpx, ffuf).
+- dev5 holds the lite merge to `report.json` and `report.md`.
+- dev2 finds subdomains and IPs to dev2.json (see Dev 2 section above for flags and keys).
+- dev4 finds URLs and JS endpoints to dev4.json (see Dev 4 section above for flags and limits).
 
-## Build order
+## Deliverable
 
-I built httpx first because it is safe and feeds everything else. Then nmap parsing. Then the mode gate and scope check. ffuf came last since it needs live HTTP hosts from the earlier steps. If you pick this branch up, test in that same order.
+v1 delivers a unified attack surface map as `report.json` plus a readable `report.md`, built from flat files with no servers. The interactive HTML dashboard and database-backed history are v2 and will read the same `report.json`.
+
+---
+
+> **Branch note (`dev3`):** this branch carries the adopted monorepo skeleton — hub files here are synced from `main@eadf2343cc3a01c907d14c4ecb306851ddf6ee44`, plus per-module slot directories `dev1/`–`dev5/`. Hub changes flow from `main`; see `dev3/README.md` for the active module and `STRUCTURE_AUDIT_REPORT.md` for the layout audit and verification receipts.

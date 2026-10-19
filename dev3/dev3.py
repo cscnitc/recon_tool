@@ -214,7 +214,7 @@ def fuzz_dirs(live, mode, fuzzer, threads, notes):
         notes.append("--fuzzer ferox ignored outside ctf mode")
         return {}
     out_map = {}
-    wl = "wordlists/raft-small.txt"
+    wl = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordlists", "raft-small.txt")
     for host, port in live:
         base = f"http://{host}:{port}/FUZZ" if port not in (443, 8443) else f"https://{host}:{port}/FUZZ"
         if tool == "ffuf":
